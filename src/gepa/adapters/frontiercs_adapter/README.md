@@ -1,13 +1,14 @@
 # Frontier-CS Adapter
 
-GEPA adapter for the [Frontier-CS](https://github.com/gepa-ai/gepa) algorithmic competitive programming benchmark. Optimizes the system prompt used to instruct an LLM to generate C++ solutions for algorithmic problems.
+GEPA adapter for the [Frontier-CS](https://github.com/FrontierCS/Frontier-CS) algorithmic competitive programming benchmark. Optimizes the system prompt used to instruct an LLM to generate C++ solutions for algorithmic problems.
 
 ## Prerequisites
 
-1. **Judge server**: The Frontier-CS judge must be running. From the algorithmic directory:
+1. **Judge server**: The Frontier-CS judge must be running. Clone the repo and start the judge:
 
    ```bash
-   cd /path/to/Frontier-CS-synthetic/Frontier-CS/algorithmic
+   git clone https://github.com/FrontierCS/Frontier-CS.git
+   cd Frontier-CS/algorithmic
    docker-compose up -d
    ```
 
@@ -15,14 +16,16 @@ GEPA adapter for the [Frontier-CS](https://github.com/gepa-ai/gepa) algorithmic 
 
 ## Dataset
 
-Load problems from the local `problems/` directory:
+Load problems from the [Frontier-CS](https://github.com/FrontierCS/Frontier-CS) repo (cloned to `~/.cache/gepa/frontier-cs` on first use):
 
 ```python
 from gepa.examples.frontiercs import load_all_problems
 
-problems = load_all_problems(
-    problems_dir="/data/hry/Frontier-CS-synthetic/Frontier-CS/algorithmic/problems"
-)
+# Default: clones from github.com/FrontierCS/Frontier-CS
+problems = load_all_problems()
+
+# Or specify a local path
+problems = load_all_problems(problems_dir="/path/to/Frontier-CS/algorithmic/problems")
 ```
 
 Each data instance has `problem_id` and `statement` (from `statement.txt`).
@@ -33,9 +36,7 @@ Each data instance has `problem_id` and `statement` (from `statement.txt`).
 import gepa
 from gepa.adapters.frontiercs_adapter import FrontierCSAdapter
 
-problems = gepa.examples.frontiercs.load_all_problems(
-    problems_dir="/data/hry/Frontier-CS-synthetic/Frontier-CS/algorithmic/problems"
-)
+problems = gepa.examples.frontiercs.load_all_problems()
 
 seed_prompt = {
     "system_prompt": (

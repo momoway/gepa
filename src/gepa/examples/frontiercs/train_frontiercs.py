@@ -19,9 +19,8 @@ from pathlib import Path
 
 from gepa import optimize
 from gepa.adapters.frontiercs_adapter import FrontierCSAdapter
-from gepa.examples.frontiercs import load_all_problems
+from gepa.examples.frontiercs import get_frontiercs_problems_dir, load_all_problems
 
-DEFAULT_PROBLEMS_DIR = "/data/hry/Frontier-CS-synthetic/Frontier-CS/algorithmic/problems"
 DEFAULT_SEED_PROMPT = """You are a competitive programmer. You will be given a problem statement, please implement a solution in C++. The execution time and memory limit are also stated in the statement so be aware of the complexity of the program. Please wrap the code in ```cpp and ``` so that it is properly formatted. Your response should ONLY contain the C++ code, with no additional explanation or text."""
 
 
@@ -30,8 +29,8 @@ def main() -> None:
     parser.add_argument(
         "--problems_dir",
         type=str,
-        default=DEFAULT_PROBLEMS_DIR,
-        help="Path to Frontier-CS problems directory",
+        default=None,
+        help="Path to Frontier-CS problems directory (default: clone from github.com/FrontierCS/Frontier-CS)",
     )
     parser.add_argument(
         "--output_dir",
@@ -101,6 +100,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    problems_dir_resolved = args.problems_dir or str(get_frontiercs_problems_dir())
     problems = load_all_problems(problems_dir=args.problems_dir)
     if args.problem_ids:
         id_set = set(args.problem_ids)
@@ -135,7 +135,7 @@ def main() -> None:
     results: dict[str, dict[str, str | float]] = {}
 
     log("-" * 60)
-    log(f"Problems dir: {args.problems_dir}")
+    log(f"Problems dir: {problems_dir_resolved}")
     log(f"Output dir: {args.output_dir}")
     log(f"Model: {args.model}, Reflection: {args.reflection_lm}")
     log(f"Judge: {args.judge_url}, Budget per problem: {args.max_metric_calls}")
