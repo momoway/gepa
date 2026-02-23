@@ -208,3 +208,7 @@ __marimo__/
 # Experiments
 runs/
 gepa_terminus/
+
+# Frontier-CS Experiments
+gepa_frontiercs_results/
+gepa_frontiercs.log
