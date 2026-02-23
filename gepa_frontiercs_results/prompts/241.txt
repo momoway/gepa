@@ -1,0 +1,87 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++ that strictly conforms to the required output format and fits within the stated time and memory limits. Your response must ONLY contain the C++ code wrapped in ```cpp ... ``` with no extra explanation or text.
+
+Task summary and constraints (derived from the statement and examples):
+
+- Input:
+  - Multiple test cases. First line: integer T (1 ≤ T ≤ 2^16).
+  - For each test: integer n, then a binary string s of length N = 2^n representing the truth table of a boolean function of n variables.
+  - Mapping from assignment (x1..xn) to string index k (1-based) is:
+    k = 1 + sum_{i=1..n} xi * 2^{i-1} (i.e., a is bit 0, b is bit 1, etc.; mask = sum xi<<i).
+- Output for each test:
+  - If no valid expression exists using only T, F, variables a..z (i-th variable is the i-th lowercase letter), and binary operators & and |, print "No".
+  - Otherwise, print "Yes" and on the next line a valid expression that exactly matches the function. Strict format:
+    - Tokens are only T, F, a..z, and binary operators inside parentheses.
+    - Every binary operator must be parenthesized as "(<expr>&<expr>)" or "(<expr>|<expr>)".
+    - No extra spaces. Parentheses nesting depth must be ≤ 100.
+
+Domain-specific requirements and observations:
+
+- The only allowed operators are monotone: &, |, and constants T, F. Therefore, a function is representable iff it is monotone non-decreasing w.r.t. flipping any xi from 0 to 1.
+  - Monotonicity check: For each i in [0..n-1], for each mask m with i-th bit = 0, ensure s[m] ≤ s[m | (1<<i)] (treat '0' < '1'). If any violation, output "No".
+- Handle constants:
+  - If all s are '0', output "Yes" and "F".
+  - If all s are '1', output "Yes" and "T".
+- Variables are named a..z. If n > 26 and the function is not constant, it cannot be expressed; in that case print "No". For n ≤ 26, variable naming is possible.
+- To produce a correct expression with few operators, use monotone DNF and CNF built from the function's antichains:
+  - Minimal 1-assignments (minOnes): all masks m with s[m]=='1' such that for every set bit i in m, s[m ^ (1<<i)]=='0'.
+  - Maximal 0-assignments (maxZeros): all masks m with s[m]=='0' such that for every unset bit i in m, s[m | (1<<i)]=='1'.
+  - DNF: OR of AND-terms. Each term for m in minOnes is the AND of variables whose bits are 1 in m.
+  - CNF: AND of OR-clauses. Each clause for z in maxZeros is the OR of variables whose bits are 0 in z (at least one must be 1 to avoid z).
+- Choose the form with fewer binary operators (ties can prefer DNF):
+  - DNF ops = sum over m in minOnes of (popcount(m) - 1) + max(0, |minOnes| - 1).
+  - CNF ops = sum over z in maxZeros of ((n - popcount(z)) - 1) + max(0, |maxZeros| - 1).
+  - If minOnes is empty, the function is F (already handled). If maxZeros is empty, the function is T (already handled).
+- Performance constraints:
+  - Time: 2 seconds total. Memory: 512 MB.
+  - Ensure O(n * N) preprocessing time per test, where N = 2^n, is acceptable due to the given sum constraints (the problem guarantees sum of 2^{2n} over all tests ≤ 2^30, and practically n ≤ 26 due to variable naming).
+  - Avoid excessive memory and copying that may cause bad_alloc. Do NOT build large vectors of strings or perform repeated concatenations of large strings.
+
+Implementation strategy to avoid memory/time issues:
+
+1) Monotonicity and constants:
+   - Scan s once to detect all0/all1 flags.
+   - If not constant, do the O(n*N) monotonicity check as above.
+
+2) Build minOnes and maxZeros:
+   - For each mask m in [0..N-1]:
+     - If s[m]=='1', check all set bits i in m: if any s[m^(1<<i)]=='1', then m is not minimal; else add to minOnes.
+     - Else (s[m]=='0'), check all unset bits i: if any s[m|(1<<i)]=='0', then m is not maximal; else add to maxZeros.
+   - Use __builtin_ctz and bit tricks for speed.
+
+3) Count ops for DNF vs CNF and pick the smaller.
+
+4) Print the chosen expression directly to std::ostream without building huge intermediate strings:
+   - Always print without spaces.
+   - For a sequence of k items combined by an operator, print a perfectly balanced binary tree of operators to bound parentheses depth by O(log k).
+   - Implement helper printers:
+     - print_var(i): prints char('a'+i).
+     - print_and_mask(mask): prints the AND of variables whose bits are set in mask:
+       - If popcount(mask) == 1, print that variable.
+       - Else, split the set bits into two groups of sizes floor(k/2) and ceil(k/2) by taking the first floor(k/2) lowest-index set bits into left_mask and the rest into right_mask, then print "(" + left "&" right + ")" recursively.
+     - print_or_from_zero_mask(z): let need = (~z) & ((1u<<n)-1). This is the set of variables in the clause. Print as above but with '|' and using need instead of z.
+     - print_balanced_list(op, vector<uint32_t>& arr, l, r, element_printer):
+       - If r-l == 1: element_printer(arr[l]).
+       - Else: m=(l+r)/2, print "(" + left op right + ")" recursively.
+   - For top-level:
+     - DNF: balanced OR over terms; each term is printed via print_and_mask.
+     - CNF: balanced AND over clauses; each clause is printed via print_or_from_zero_mask.
+   - For any single item, print it without parentheses. Every binary operator application must be wrapped in parentheses.
+
+5) Parentheses depth:
+   - Balanced printing ensures depth is ≤ log2(number_of_terms) + log2(term_size) and well under 100 for given constraints.
+
+6) Edge handling:
+   - If n > 26:
+     - If all0 -> "Yes\nF"
+     - Else if all1 -> "Yes\nT"
+     - Else -> "No"
+   - Ensure you never use 1<<n with n≥32; but with n≤26 this is safe. Use uint32_t masks.
+
+Coding requirements:
+
+- Use fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).
+- Avoid building massive strings or using vectors of strings; print directly to cout through recursive functions.
+- Use vector<uint32_t> (or uint32_t) to store masks for minOnes and maxZeros. Reserve sizes where appropriate.
+- The entire program must be contained in a single C++ file and compiled under typical competitive programming settings.
+- Output must match the required format exactly with no extra spaces or lines.
+- Wrap the final code in ```cpp ... ``` markers as requested.

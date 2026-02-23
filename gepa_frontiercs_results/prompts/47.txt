@@ -1,0 +1,135 @@
+You are a competitive programmer. Implement a single self-contained C++17 program that reads a 2D Rectangular Knapsack instance (with optional 90° rotations) as JSON from stdin, packs rectangles using a Skyline Bottom-Left heuristic, and prints a feasible packing as JSON to stdout. The program must compile quickly and run within 1 second and 512 MB.
+
+Strict output rule:
+- Your response must ONLY contain the C++ code wrapped in ```cpp ... ``` with no additional text.
+
+Input format (exact):
+- A single JSON object with exactly two keys: "bin" and "items".
+  - "bin": {"W": <int>, "H": <int>, "allow_rotate": <true|false>}
+  - "items": array of item-type objects, each exactly:
+    {"type":"<id-string>","w":<int>,"h":<int>,"v":<int>,"limit":<int>}
+- All integers fit in 64-bit signed; widths/heights/coords are non-negative and fit in 32-bit.
+
+Output format (exact):
+- A single JSON object with exactly one key "placements":
+  - "placements": array of placement objects, each exactly:
+    {"type":"<id>", "x":<int>, "y":<int>, "rot":<0|1>}
+- rot must be 0 when allow_rotate is false.
+- Geometry uses half-open rectangles: [x, x+w) × [y, y+h).
+- Touching edges/corners is allowed; overlaps are not.
+
+Feasibility constraints you must guarantee:
+- All rectangles fully inside [0, W) × [0, H).
+- No overlaps under the half-open convention.
+- Per-type counts do not exceed limit.
+- Only use rot=1 if allow_rotate=true.
+
+Scoring is by total profit, but you only need to output a valid packing. However, implement a strong heuristic for decent scores.
+
+Algorithm requirements (Skyline Bottom-Left packer):
+- Maintain a skyline as an increasing-x polyline with nodes (x, height), starting with [(0,0), (W,0)].
+- For placement candidates, only consider x at skyline node positions.
+- For a candidate rectangle (w,h) at a node x, compute y = max skyline height over [x, x+w). The placement is feasible if y + h ≤ H.
+- Choose the candidate with the lowest y; tie-break by lowest x. If rotation allowed, consider both (w,h) and (h,w) and pick the better.
+- Skyline update when placing at (x,y,w,h):
+  - Ensure nodes exist at x and at x+w, each with the pre-update height at that position (insert if necessary).
+  - Raise the skyline over [x, x+w) by h:
+    - Set the node at x to y+h.
+    - Erase interior nodes strictly between x and x+w.
+    - Keep the node at x+w with its previous height (from before the raise).
+  - Merge adjacent nodes if they have equal heights to maintain a minimal representation.
+- Implement skyline operations in O(#nodes) per try with binary searches for node indices to keep it fast.
+
+Heuristic to build candidate sequences:
+- Try multiple item orderings and keep the best total profit packing among them (within a strict time budget):
+  - Sort orderings to try (≈8–10 total): 
+    1) value density v/(w*h) desc (tie-break by v desc, then area asc),
+    2) value v desc,
+    3) area w*h desc,
+    4) area w*h asc,
+    5) max(w,h) desc,
+    6) height h desc,
+    7) width w desc,
+    8) min(w,h) desc,
+    9) input order.
+  - For each ordering, create a multiset sequence where type t appears up to cap_t = min(limit_t, floor(bin_area/area_t) + 5). This caps attempts and keeps runtime low even with large limits.
+  - Greedily iterate the sequence; at each step, try to place the next item using the skyline BL heuristic. If rotation is allowed, consider both orientations. If it doesn't fit anywhere, skip it.
+  - Track placed counts per type and never exceed limit.
+  - Keep the candidate solution with the highest total profit found within the time budget.
+
+Critical performance and robustness:
+- Time is tight (≈1s total). Enforce a global time budget of about 0.8 seconds for trying orderings (so compile+I/O+validation remain within 1s).
+- Cap total attempted/accepted placements (e.g., ~10000–30000) as a guard.
+- Use only standard headers; fast compile and run within time/memory limits.
+- Read all stdin into a string once; write stdout in one pass.
+- Reserve vectors generously to avoid reallocations. Keep skyline nodes minimal by merging equal neighbors.
+- Avoid non-standard headers like <bits/stdc++.h>. Include necessary standard headers explicitly.
+- IMPORTANT: If you use INT_MAX/INT_MIN/INT32_MAX, include <climits> (and/or <cstdint>) or prefer std::numeric_limits<int>::max() to avoid compile errors.
+
+JSON parsing (targeted for this schema):
+- Write a small tokenizer/parser that handles:
+  - Whitespace skipping,
+  - Strings with escapes, including \uXXXX and surrogate pairs; decode to UTF-8,
+  - Integers (64-bit signed) and booleans,
+  - Punctuation tokens: { } [ ] , :.
+- Parse directly into typed structs: 
+  - Bin{int W, int H, bool allow_rotate}
+  - vector<ItemType>{string id, int w, int h, long long v, int limit, input-index}
+- Enforce exact schemas and key sets:
+  - "bin" must contain exactly keys W, H, allow_rotate (no extras).
+  - Each item must contain exactly keys type, w, h, v, limit (no extras).
+  - Root must contain exactly keys "bin" and "items" (no extras).
+- Validate number ranges: W, H, w, h, limit fit in 32-bit non-negative; v fits in 64-bit non-negative.
+- If parsing fails or schema is invalid, print {"placements":[]} and exit.
+
+Mandatory final feasibility filter (sweep-line validator):
+- After building the best candidate list, run a sweep-line to remove any violation and strictly enforce constraints (even if skyline logic had a rare bug).
+- Steps:
+  - Convert placements to realized rectangles (w′,h′) based on rot (clamp rot=0 if rotations are not allowed).
+  - Discard any out-of-bounds rectangles (x<0 or y<0 or x+w′>W or y+h′>H).
+  - Create events (x_end, end) and (x_start, start) for each remaining rectangle. Sort by x; tie-break: process end events before start events to respect half-open geometry.
+  - Sweep in increasing x. Maintain an ordered set of active intervals by (y_start, y_end, idx).
+  - On start: enforce per-type limits; then only check the predecessor and successor in the active set for y-interval overlap. If either overlaps under half-open rules (i.e., not (y2 ≤ y1′ or y2′ ≤ y1)), discard; else accept and insert.
+  - On end: remove from active if it was accepted.
+  - This guarantees no overlaps and enforces limits.
+- The final output must use rot=0 for all placements if allow_rotate=false (clamp at output time as well).
+
+Output:
+- Always print exactly: {"placements":[...]}.
+- Each element must be exactly {"type":"<id>","x":<int>,"y":<int>,"rot":<0|1>}.
+- Escape type id strings for JSON correctness.
+- Coordinates and rot must be integers.
+- If anything fails (parse errors, time guard, or no feasible placements), output {"placements":[]}.
+
+Implementation notes and pitfalls:
+- Half-open geometry: rectangles [x, x+w)×[y, y+h) do not overlap when edges just touch (x2 == x1′ or y2 == y1′).
+- Skyline candidate x positions are only at nodes; skip positions where x + w > W.
+- For skyline best-position search, initialize the best height using std::numeric_limits<int>::max() (or include <climits> if you use INT_MAX) to avoid uninitialized/compile issues.
+- For skyline update, ensure nodes at x and x+w exist with pre-update heights; then raise and merge as specified—this avoids subtle overlaps.
+- Keep the program deterministic; do not use randomization.
+- Ensure the total runtime including parsing, skyline tries across all orderings, validation, and printing stays within ~1s.
+
+Allowed headers (examples; do not include non-standard ones):
+- <iostream>, <vector>, <string>, <algorithm>, <cctype>, <limits>, <sstream>, <iterator>, <chrono>, <set>, <climits>, <cstdint>
+
+Program structure:
+1) Parse JSON into Bin and vector<ItemType>; on failure print {"placements":[]} and exit.
+2) Precompute the different item orderings (as above).
+3) For each ordering within the time budget:
+   - Build capped multiset sequence using cap_t = min(limit_t, floor(bin_area/area_t) + 5).
+   - Greedily pack using skyline BL, trying both orientations if allowed.
+   - Track placed counts and profit for the candidate.
+   - Keep the best candidate by total profit.
+4) Run the mandatory sweep-line feasibility filter on the best candidate (enforce bounds, non-overlap, type limits, and rotation permission).
+5) Print the final feasible placements as a single JSON object with key "placements" (escape ids, clamp rot when rotation is disabled).
+
+Compliance checklist (must all be true):
+- Output exactly one top-level key: "placements".
+- Each placement has exactly keys "type","x","y","rot".
+- All coordinates and rot are integers; rot ∈ {0,1}.
+- When rotation is disabled in input, every placement has rot = 0.
+- No placement exceeds the bin boundary.
+- No two placements overlap under the half-open geometry.
+- Per-type counts do not exceed limits.
+- Valid JSON syntax and proper escaping.
+- Use only standard headers; fast compile and run within time/memory limits.

@@ -1,0 +1,81 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. Your output must be ONLY the C++ code wrapped in ```cpp and ``` with no additional commentary.
+
+Task summary (critical, domain-specific details you must rely on and implement exactly):
+- This is an interactive task titled “Network Synchronization: Finding Dual Anomalies”.
+- There are t test cases (1 ≤ t ≤ 10). For each test case:
+  - You are given a tree with n nodes (2 ≤ n ≤ 1000), 1-indexed, via n-1 undirected edges.
+  - There are two distinct hidden nodes (the “Anomaly Points”).
+  - A query consists of printing “? c a1 a2 ... ac” (c ≥ 1, ai are node indices, strictly 1-based, printed in ascending order).
+  - The system responds with two integers: x and d.
+    - x is a node label selected from the ai you just queried (NOT the position/index in your printed list).
+    - d is the minimum, over all queried nodes, of the sum of distances from that node to the two hidden nodes.
+  - Special failure response: x = -1 and d = -1 → terminate immediately (exit the program).
+  - When you have identified the two hidden nodes, print “! u v” (in any order), then read a single string feedback: “Correct” or “Incorrect”. If “Incorrect”, terminate immediately (exit the program).
+
+Distance definition:
+- Distance between u and v is the number of edges on the simple path between them.
+
+Crucial property (MUST assume and use exactly as stated):
+- Let D = dist(hidden1, hidden2).
+- For any node y, the sum dist(y, hidden1) + dist(y, hidden2) = D + 2 * (distance from y to the hidden path). Hence:
+  - This sum equals D if and only if y lies on the unique path between the two hidden nodes (“the hidden path”).
+- If your query set contains at least one vertex on the hidden path, then:
+  - The returned minimum sum equals D.
+  - The returned vertex x will be on that path (and is one of the queried nodes).
+- If your query set contains no vertex from that path, the returned minimum sum will be strictly greater than D.
+
+Robust, efficient strategy to locate both hidden nodes (implement this exact approach; add the specified robustness checks and do not deviate):
+1) Read the tree, build adjacency lists (1-based).
+2) Initial probe: Query all nodes {1..n} in ascending order. You will receive a vertex s that lies on the path between the hidden nodes, and D = dist(hidden1, hidden2).
+3) BFS from s to compute depth[u] = dist(s, u) for all u, and group nodes by depth into layers L[0], L[1], ..., L[maxDepth].
+   - In a tree, BFS from any source s ensures each integer depth from 0 to maxDepth has at least one node (e.g., nodes along a farthest path), so every L[k] is non-empty for 0 ≤ k ≤ maxDepth.
+   - Sort each L[k] in ascending order before any query.
+4) Binary search on depth to find the farthest layer that still intersects the hidden path:
+   - Define predicate P(k): Query the set L[k]. If the judge returns minimum sum == D, then there exists at least one node on the hidden path at depth k from s, so P(k) is true; otherwise false.
+   - This predicate is monotone: true for k in [0..Lmax] and false for k > Lmax, where Lmax = max(dist(s, hidden1), dist(s, hidden2)).
+   - Perform binary search for the largest k with P(k) = true:
+     - Use lo=0, hi=maxDepth.
+     - Maintain two tracking variables: candidate_e1 (last x returned with d==D) and candidate_depth (the corresponding k).
+     - While (lo < hi):
+       - mid=(lo+hi+1)/2; ask(L[mid]) (ensure L[mid] is printed in ascending order).
+       - If returned d == D:
+         - Set lo=mid; set candidate_e1=x and candidate_depth=mid.
+       - Else:
+         - Set hi=mid-1.
+     - After the loop, lo == Lmax. To be robust against any binary search cornering, if candidate_depth != lo, issue exactly one more query ask(L[lo]) and set candidate_e1 to the returned x (d will equal D here by definition). Then set e1 = candidate_e1.
+     - At depth Lmax, any node in L[Lmax] on the hidden path is an endpoint; if both endpoints are at the same depth from s, either is acceptable as e1.
+5) Find the second endpoint e2:
+   - BFS from e1 to get dist_e1[u] for all u.
+   - Build the set S = { u | dist_e1[u] == D }. This set contains e2; among nodes in S, the only one on the hidden path is e2.
+   - Optional pruning (safe and may reduce queries, but not required): Intersect with the symmetric depth from s: keep only nodes with depth_s[u] == D - depth_s[e1]. This preserves e2 and may shrink S.
+   - If S has size 1, then that sole node is necessarily e2; you may use it directly without querying. Otherwise, query S (sorted ascending); by the property, the judge will return e2 (with minimum sum = D).
+6) Output the final answer as “! e1 e2”, flush, read the feedback string (“Correct”/“Incorrect”), and if it is not “Correct” then terminate. Otherwise proceed to the next test case.
+
+Interactive I/O requirements (follow exactly):
+- Print each query in the exact format: “? c a1 a2 ... ac”, followed by a newline, then flush stdout (cout.flush()).
+- Query sets must be non-empty. Ensure you never send an empty query (layers and the dist_e1 == D set are guaranteed non-empty under the given properties).
+- Always print nodes in 1-based indexing. Print sets in ascending order with single spaces between tokens and no trailing spaces.
+- After each query, read two integers x and d. If read fails or if (x, d) == (-1, -1), terminate immediately by exiting the program.
+- When answering a test case, print “! u v” followed by a newline and flush, then read a single string feedback (“Correct”/“Incorrect”). If “Incorrect”, terminate immediately by exiting the program. If reading the feedback fails (EOF), terminate immediately as well.
+- Do not print anything else. No debug prints, no extra whitespace or lines. Do not write to stderr.
+
+Implementation details you must adhere to:
+- Use C++17. Enable fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Use 1-based indexing everywhere.
+- Store the tree in adjacency lists (vector<vector<int>> adj(n+1)).
+- Implement BFS utilities:
+  - bfs(int src, const vector<vector<int>>& adj) → vector<int> dist (size n+1, dist[src]=0, -1 for unvisited) computing distances.
+  - From dist, build layers: vector<vector<int>> layers where layers[d] contains all nodes at distance d from src; sort each layer ascending before querying.
+- Implement a helper function ask(const vector<int>& S) that:
+  - Explicitly checks S is non-empty and never sends an empty query.
+  - Prints the query in the required format with exact spacing: first “? ”, then S.size(), then each node separated by a single space, then ‘\n’.
+  - Flushes the output immediately.
+  - Reads x and d; if read fails or if (x, d) == (-1, -1), terminate immediately by exiting the program.
+  - Returns the pair (x, d).
+- IMPORTANT: Do NOT declare/define any function named terminate; it clashes with std::terminate and causes ambiguous calls. If you need a helper to exit early, use a uniquely named function such as die() or quit_now() that calls std::exit(0).
+- Maintain and reuse the x (and its depth) returned from the deepest successful binary search step (candidate_e1, candidate_depth). After the binary search, if candidate_depth != final lo, make one final ask on L[lo] to fetch the exact endpoint at depth Lmax; otherwise reuse the stored x. This removes ambiguity and prevents relying on an outdated candidate.
+- Ensure all queried sets are printed in ascending order (including the initial {1..n}, every L[k], and the S set).
+- Keep the solution compact, iterative (no recursion), and within time/space limits for n ≤ 1000, t ≤ 10.
+
+Output requirement reminder:
+- Your response must ONLY contain valid C++ code inside ```cpp and ``` fences, with no explanatory text or extra lines.

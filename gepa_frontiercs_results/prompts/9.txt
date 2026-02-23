@@ -1,0 +1,67 @@
+You are a competitive programmer. You will be given a problem statement; implement a solution in C++ that is correct, efficient, and respects the time and memory limits. Your response must ONLY contain the C++ code wrapped in a single ```cpp ... ``` block, with no additional text.
+
+Task (from the example problem; include all these specifics in your solution):
+- You are given T test cases. For each test case:
+  - An integer n (10 < n <= 1000).
+  - A permutation p of 1..n, where p[i] is the token currently on vertex i.
+  - A tree with n vertices and n-1 edges. The i-th edge in the input has index i (1-based). Vertices are 1-indexed.
+  - It is guaranteed that sum of n^2 over all test cases ≤ 1e6.
+- Operation: In one operation, you select a matching (a set of pairwise vertex-disjoint edges) and for each selected edge (u, v), you swap the tokens on u and v simultaneously.
+- Goal: Transform the permutation so that token i ends on vertex i for all i, using any number of operations.
+- Output (per test case):
+  - First print m, the number of operations.
+  - Then print m lines, each line: ki followed by ki edge indices (1..n-1) that form a matching for that operation.
+- Correctness is strictly checked by applying the operations to the initial permutation. Minimality is not required; correctness and constraints compliance are.
+
+Key requirements and pitfalls:
+- Indices are 1-based. Edge indices are exactly the order in which edges are read (1..n-1).
+- You may output single-edge matchings only (ki = 1 each line). This always forms a valid matching and simplifies implementation.
+- Ensure the algorithm terminates and does not loop or explode memory usage. Avoid approaches that can oscillate tokens or grow operations unboundedly.
+- Use fast I/O and keep memory reasonable. With sum n^2 ≤ 1e6, O(n^2) swaps across all tests is acceptable.
+
+Robust algorithm to guarantee correctness:
+- Use a leaf-stripping strategy that never disturbs already fixed vertices:
+  1) Root the tree at 1. Precompute:
+     - parent[0][v] and depth[v] via BFS/DFS,
+     - binary lifting table parent[k][v] for LCA and k-th ancestor queries (LOG = ceil(log2(n)) + 1),
+     - parEdge[v] = edge index connecting v to parent[0][v] (root has parEdge = -1).
+  2) Maintain:
+     - valAt[v] = current token at vertex v,
+     - pos[x] = current vertex holding token x (inverse of valAt),
+     - deg[v] = current degree in the active tree,
+     - removed[v] = whether v has been taken out (fixed) from the active tree,
+     - a queue of current leaves (deg[v] == 1 and not removed).
+  3) While more than one active vertex remains:
+     - Pop a leaf v with deg[v] == 1 and not removed (skip stale entries).
+     - Bring token v to vertex v along the unique path within the active tree:
+       - While pos[v] != v:
+         - Let u = pos[v].
+         - Compute w = LCA(u, v).
+         - If u != w: next step is along the edge (u, parent[0][u]) (move token v up one step).
+           - Edge id is parEdge[u].
+         - Else: next step goes down from u towards v:
+           - Let c = the child of u on the path to v, which equals the (depth[v] - depth[u] - 1)-th ancestor of v.
+           - Edge id is parEdge[c], and the endpoints are (u, c).
+         - Perform that single-edge swap:
+           - Swap valAt[end1] and valAt[end2], and update pos for both tokens accordingly.
+           - Record the edge id as one operation line (ki = 1).
+     - After token v is placed at v, mark removed[v] = true and set deg[v] = 0.
+       - Find its unique active neighbor nb (the only neighbor with removed[nb] == false), decrement deg[nb], and if deg[nb] == 1 push nb into the leaf queue.
+  4) One vertex will remain active at the end; its token must be correct automatically.
+- This strategy guarantees:
+  - Each leaf’s token is fixed permanently (future paths never traverse removed leaves).
+  - The process terminates with all tokens at correct vertices.
+  - Total number of swaps is finite and acceptable under constraints.
+
+Implementation details:
+- Build adjacency list storing (neighbor, edge_id).
+- Compute parent/depth with iterative BFS/DFS. Precompute binary lifting parent[k][v].
+- Implement:
+  - climb(u, k): move u up by k ancestors using binary lifting,
+  - lca(u, v): lowest common ancestor via binary lifting.
+- When printing operations, output one line per swap with "1 edge_id".
+- For zero swaps in a test case, print just "0".
+- Use ios::sync_with_stdio(false) and cin.tie(nullptr).
+- Clear/reinitialize per test case. Do not print any extra text or debugging output.
+
+Your final answer must be only the C++ code implementing the above, wrapped in a single ```cpp block. Do not include any explanation or comments outside the code block.

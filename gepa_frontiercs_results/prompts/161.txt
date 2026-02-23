@@ -1,0 +1,137 @@
+You are a competitive programmer. Write a single-file C++17 program that reads exactly one AHC020-like test case from stdin and outputs exactly two lines, nothing else. The program must be deterministic, robust, compile cleanly, and always produce a valid configuration that strictly follows the I/O format. It must avoid undefined behavior and run comfortably within the constraints.
+
+Absolutely no extra prints. Output exactly two lines per the format, with the correct counts, single spaces between integers, and a trailing newline at the end of each line. No leading/trailing spaces on the lines themselves. Do not print comments or debug output.
+
+Input format (exactly one test case):
+- First line: N M K
+- Next N lines: x_i y_i (1-based i; note (x_1, y_1) = (0,0))
+- Next M lines: u_j v_j w_j (edges are 1-indexed in input; undirected; no parallel edges)
+- Next K lines: a_k b_k (residents)
+- All values are integers.
+
+Known constraints (must be respected for choosing algorithms, types, and performance):
+- N = 100
+- 100 ≤ M ≤ 300
+- 2000 ≤ K ≤ 5000
+- Coordinates x_i, y_i, a_k, b_k in [-10000, 10000]; all station coords unique; all resident coords unique; no resident coincides with a station.
+- Graph is connected, planar, undirected; (x_1, y_1) = (0, 0).
+- Edge j connects u_j and v_j with weight w_j satisfying 100*D_j ≤ w_j ≤ 2500*D_j, where D_j = round(Euclidean distance of endpoints).
+- Each resident is within Euclidean distance 5000 of at least one station.
+- Edge weights fit in 32-bit, but distances/sums can exceed 32-bit; use 64-bit integers (long long) for squared distances, path sums, and total cost S.
+
+Output format (must be exactly two lines, nothing else):
+- Line 1: N integers P_1 ... P_N (0 ≤ P_i ≤ 5000), space-separated; indices correspond to input order.
+- Line 2: M integers B_1 ... B_M (each 0 or 1), space-separated; indices correspond to input edge order.
+
+Semantics:
+- You decide which edges have power ON (B_j ∈ {0,1}).
+- You set output strength P_i (0 ≤ P_i ≤ 5000) for each station.
+- Only stations reachable from station 1 (index 1 in input; 0 in code) via ON edges actually broadcast. Coverage from a station i is a disk of radius P_i centered at (x_i, y_i).
+- Cost S = sum_i P_i^2 + sum_{j: B_j=1} w_j. During search/tie-breaking, maximize number of residents covered; break ties by minimizing S.
+
+Implementation language and standard:
+- C++17. Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr).
+- Use 0-based indices internally; convert u_j, v_j from 1-based input to 0-based.
+- Keep B_j exactly aligned with input edge order (do NOT reorder edges).
+- Use long long for squared distances and all sums (path lengths, S). Edge weights can be stored as int; sum to long long when needed.
+
+Deterministic, robust algorithm (with safe refinements and multiple candidates):
+1) Read input:
+   - Read N, M, K. If reading fails, exit without printing anything.
+   - Store station coordinates in vectors x[i], y[i] (0-based).
+   - Store edges in input order: edges[j] = {u, v, w} converted to 0-based u, v.
+   - Build undirected adjacency list adj[i] of pairs (neighbor, edge_index) preserving input edge order in edges[].
+   - Store residents a[k], b[k] as long long.
+
+2) Build two baseline spanning trees rooted at station 1 to route power paths:
+   A) Shortest-Path Tree (SPT) by Dijkstra from node 0 on edge weights w_j:
+      - dist[i] = minimal total edge weight from node 0 (long long).
+      - parentVertex[i], parentEdge[i] to reconstruct the SPT path to root.
+      - Priority queue with greater comparator; break ties deterministically (e.g., prefer smaller parent vertex then smaller edge index).
+   B) Minimum Spanning Tree (MST) via Kruskal:
+      - Sort edges by w_j; DSU to build MST.
+      - Root the MST at node 0 by BFS/DFS to fill parentVertexMST[i], parentEdgeMST[i].
+   - For both trees, parent of root is -1; if a parent pointer becomes invalid later while tracing to root, mark the plan invalid and skip it.
+
+3) Precompute resident distances to stations once:
+   - For each station i, build near[i] as two parallel vectors:
+     - near[i].dsq: squared distances dsq[i][k] = (a_k - x_i)^2 + (b_k - y_i)^2 (compute in 64-bit).
+     - near[i].res: corresponding resident indices.
+   - For each i, filter residents to those with dsq ≤ 5000^2, and sort by dsq ascending (stable tie-break by resident index for determinism).
+   - This allows O(log |near[i]|) upper_bound for any radius and O(t) iteration over first t residents.
+
+4) Candidate radii:
+   - Fixed set R_fixed = {400, 600, 800, 1000, 1200, 1500, 1800, 2000, 2200, 2500, 2800, 3000, 3200, 3500, 3800, 4000, 4200, 4500, 4800, 5000}.
+   - Per-station dynamic radii derived from actual resident distances:
+     - For each i, take the squared distances in near[i].dsq at ranks (if exist): 3, 5, 8, 12, 16, 20, 30, 40, 50, 75, 100, 150, 200, 300, 500, last.
+     - Convert to integer radii r = floor(sqrt(dsq)) rounded up to the next multiple of 50 (to limit variants), clamp to [0, 5000].
+   - For selection, for each i use the union of R_fixed and its dynamic radii, unique-sorted. Do not exceed 5000.
+
+5) Greedy selection on top of a chosen power-routing tree (repeat for both SPT and MST) with multiple parameterizations, then keep the best final plan by (maxCovered, minCost):
+   - Try tree in {SPT, MST}.
+   - For each tree, try a small deterministic set of iteration limits T ∈ {15, 25, 35}.
+   - For each (tree, T), try a small deterministic set of cost weights α ∈ {0, 0.1, 0.2} and β ∈ {1.0, 2.0} (handled as integers by scaling, see below).
+   - For each configuration:
+     - Initialize P_i = 0 for all i; B_j = 0 for all j; coveredCnt[k] = 0 for all k; invalidPlan=false.
+     - For it = 1..T:
+       - For each station i with P_i == 0, and for each candidate radius r in its per-station radii:
+         - Compute gain(i,r) = number of uncovered residents within r for station i:
+           - Let r2 = r*r; let t = upper_bound(near[i].dsq, r2); among near[i].res[0..t-1], count residents with coveredCnt[k] == 0.
+         - Compute pathCostOff(i) on the current chosen tree = sum of weights of tree edges along path i→root that currently have B=0 (trace via parentVertex/tree; if any parent invalid, invalidPlan=true and abort this configuration).
+         - Compute incremental power cost addP = r^2 (since P_i is 0 here).
+         - Define a deterministic score preferring coverage per cost, using integer arithmetic:
+           - Let scale = 10^9 (long long). Let A = round(α*10), BETA = round(β*10) as small integer weights (e.g., α=0.1→A=1).
+           - Define costTerm = pathCostOff(i) + BETA * addP (all long long).
+           - Define value = gain(i,r) * scale - (A+1) * costTerm.
+           - Track the best candidate by maximizing (value, gain, -pathCostOff, -r, -i) lexicographically for deterministic tie-breaking (prefer smaller r/i).
+       - If the best gain ≤ 0 or no candidate exists, break.
+       - Select best (i*, r*): set P[i*] = r*; add coverage by incrementing coveredCnt[k] for residents within r*; activate path edges along chosen tree from i* to root by setting corresponding B[parentEdge[*]]=1 (abort on invalid parent).
+     - If invalidPlan, discard this configuration.
+
+   - Post-processing for the current plan (if valid):
+     - Recompute reachability V' via BFS using only edges with B_j == 1. Only stations in V' can broadcast:
+       - For safety, set P_i = 0 for all i not in V'. Then rebuild B from scratch as the union of chosen-tree paths for all i with P_i > 0. This guarantees stations with P_i > 0 are reachable and B only contains needed edges.
+     - Recompute coveredCnt from scratch using current P and near lists.
+     - Prune stations whose removal does not reduce coverage:
+       - For each selected station i (P_i > 0), in increasing index i:
+         - Let r = P_i; let t = upper_bound(near[i].dsq, r^2).
+         - If for all residents k in near[i].res[0..t-1], coveredCnt[k] - 1 ≥ 1, then set P_i = 0 and decrement coveredCnt[k] for those k.
+     - Optional radius shrinking to reduce cost without reducing coverage:
+       - For each i with P_i > 0, shrink P_i to the smallest candidate r' ≤ current P_i such that coverage does not decrease:
+         - Test candidates in ascending order; for each r', let t_new=upper_bound(dsq, r'^2) and t_cur for current; ensure all residents in indices [t_new, t_cur) have coveredCnt[k] - 1 ≥ 1; if so, decrement those coveredCnt and adopt r' (break after first feasible since we scan ascending).
+     - Rebuild B again as the union of chosen-tree paths of remaining selected stations.
+     - Compute final ncovered = number of residents with coveredCnt[k] > 0.
+     - Compute final cost S = sum_i P_i^2 + sum_{j: B_j=1} w_j using long long.
+   - Across all tried (tree, T, α, β), keep the plan with maximal ncovered; break ties by minimal S. Deterministic tie-breaking (indices included) ensures reproducibility.
+
+6) Fallback to guarantee a legal, non-empty solution in any unexpected situation:
+   - If no valid plan results from the tries or ncovered == 0, output a trivial safe plan:
+     - P_1 (i=0) = 2000; all other P_i = 0.
+     - All B_j = 0.
+   - This plan is always legal: station 1 is reachable from itself without any edges ON and will cover some residents near the origin.
+
+7) I/O and implementation details to avoid WA, UB, and past compile errors:
+   - Use 0-based indices internally; convert u_j, v_j from 1-based input to 0-based.
+   - Clamp P_i to [0, 5000] before final cost computation and printing (we only set from candidates, but clamp for safety).
+   - Ensure exactly N integers on the first line and exactly M integers on the second line. Print single spaces between numbers; no leading/trailing spaces; end each line with '\n'. No extra newlines, no extra whitespace.
+   - If for any reason the sizes of the P or B arrays do not match N or M (should never happen), rebuild the trivial fallback plan (P_1=2000, others 0; all B_j=0) and print that.
+   - Avoid undefined behavior: bounds-check accesses when in doubt, use long long for (dx*dx + dy*dy), path sums, and S. Guard against invalid parent pointers during path activation (abort plan if encountered).
+   - Deterministic tie-breaking everywhere (prefer smaller indices when scores tie). Do not use randomness or seeds.
+   - IMPORTANT: Carefully write for-loops with correct increment syntax (e.g., for (int i = 0; i < N; ++i)) — do NOT write malformed increments (a previous attempt elsewhere failed to compile due to "++i++)"). Do not define macros named i, j, etc., that could interfere with ++i.
+   - Keep lambdas’ return types consistent (e.g., bool where you return true/false). Avoid variable-length arrays and platform-specific extensions.
+   - Build with -O2 -std=gnu++17 assumptions; include <bits/stdc++.h> is acceptable. Avoid recursion depth issues; prefer iterative loops/queues.
+
+8) Performance targets (well within constraints with the above approach):
+   - Dijkstra: O(M log N) with N=100, M ≤ 300.
+   - Kruskal MST: O(M log M).
+   - Precomputation: O(N*K log K) to sort near lists; upper_bound queries are O(log K).
+   - Greedy selection: up to T=35 iterations; scans at most N * |R_i| candidates per iteration with linear passes over first t residents via near lists. Overall OK for the given limits.
+   - Memory: a few tens of MB at most (vectors of distances and resident indices).
+
+Strict final output requirement:
+- Print exactly two lines:
+  - First line: P_1 ... P_N
+  - Second line: B_1 ... B_M
+- Nothing else. No comments, no headers, no debug prints.
+
+Return only the source code (no explanations) when you respond.

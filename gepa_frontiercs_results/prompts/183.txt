@@ -1,0 +1,117 @@
+You are a competitive programmer. You will be given a Maximum Independent Set (MIS) heuristic problem and must implement a high-quality C++17 solution within strict time and memory limits. Read all of the following carefully and follow it exactly.
+
+Task summary and constraints (hard requirements)
+- Input: undirected graph G = (V, E)
+  - N = |V| ≤ 10,000
+  - M = |E| ≤ 500,000
+  - Format:
+    - First line: N M
+    - Next M lines: u v (1 ≤ u, v ≤ N, u ≠ v); multiple edges allowed; no self-loops
+- Output: exactly N lines, each with x_i ∈ {0,1}; x_i = 1 means vertex i is in the independent set.
+- Validity: for each input edge {u, v}, it must not be the case that both x_u = 1 and x_v = 1.
+- Scoring: larger K = Σ x_i is better; invalid solutions score 0.
+- Limits: Time 2.0s, Memory 512MB.
+
+Engineering and I/O requirements
+- Use C++17 with fast I/O: ios::sync_with_stdio(false), cin.tie(nullptr).
+- Convert vertices to 0..N-1 internally.
+- Build adjacency lists as vector<int> per node; after reading, sort and unique each neighbor list to remove parallel edges. Ignore any u==v input (not expected but safe).
+- Reserve memory to avoid reallocations (e.g., reserve total adjacency with degree counts or push then sort/unique).
+- Use a single global timer and stop all heavy/iterative work around 1.90–1.95s. Use steady/high_resolution_clock (or steady_clock) and duration<double, milli>.
+- Output exactly N lines, no extra spaces or lines.
+- Before final print, ensure the current best solution is valid; if not, fall back to a known-valid maximal IS.
+
+High-quality heuristic plan
+Implement a multi-stage approach that combines exact reductions, robust multi-start greedy construction (without bucket-pointer bugs), and strong ARW-style local search with diversification/perturbation. Prior attempts that only allowed strictly improving moves and used a single greedy start produced small K (e.g., K_user ~ 0.65–0.76 of good baselines). To avoid this, do multiple randomized starts and allow diversification to escape local maxima.
+
+1) Preprocessing and graph build
+- Read N, M; store edges; convert to 0-index.
+- For each vertex, store adjacency as vector<int>. After reading all edges, sort and unique neighbor lists to remove duplicates.
+- Maintain deg[i] = adjacency[i].size().
+- Ensure all neighbor lists are sorted (needed for fast adjacency checks with marks or binary search).
+- Prefer contiguous vectors; avoid recursion.
+
+2) Exact kernelization: degree ≤ 1 peeling (safe reductions only)
+- Maintain alive[i] and current degree dcur[i] among alive neighbors.
+- Use a queue to repeatedly process all vertices with dcur ≤ 1:
+  - If dcur[v] == 0: select v into MIS (sel[v] = 1) and remove v.
+  - If dcur[v] == 1: let u be the unique alive neighbor of v. Select v (sel[v] = 1) and exclude u (sel[u] = 0). Remove both; update degrees of their alive neighbors.
+- Keep sel[i]: -1 = undecided, 1 = selected, 0 = excluded. After peeling stops, all removed vertices have decisions; remaining alive form the residual kernel H. Peeling decisions are final and must remain fixed in later stages.
+- Implementation details:
+  - Recompute dcur only on alive nodes; when removing a node, decrement dcur of its alive neighbors and push into queue if they reach ≤ 1.
+  - Be careful with sequence: if you exclude u from a degree-1 pair, remove it once, and update neighbors exactly once.
+
+3) Initial MIS construction on the residual kernel (multi-start)
+- On remaining alive vertices (kernel), build large maximal independent sets using a robust min-degree greedy with decrease-key support and randomization. Prior “bucket pointer only increasing” bugs are NOT allowed (they miss newly smaller degrees).
+- Implement at least one of:
+  a) Binary heap (priority_queue) with lazy keys: push (deg, v, rnd) pairs; when popping, skip if v is no longer alive or its current degree differs from the stored key. On selecting v, mark v selected and delete v and its alive neighbors; update neighbors’ degrees and push new (deg, w) entries lazily.
+  b) Bucket queue with full decrease-key: buckets[deg] as deque<int>; an index/position array to move nodes between buckets when their degree decreases. Maintain a current_min pointer; when degrees decrease below current_min, move pointer back accordingly by scanning down until finding non-empty (do NOT only increase; must move both ways).
+- Important:
+  - Tie-breaking: among same degree, add a small random noise or secondary key by id; this diversifies starts.
+  - On selecting v into IS, remove v and all alive neighbors; update degrees of their neighbors; reinsert (or move in bucket) those whose degree decreased.
+- Multi-start:
+  - Build 3–8 greedy starts (as time permits); vary random seeds/tiebreakers per run.
+  - After each greedy build, run fast augmentation (see 4a) to ensure maximality.
+  - Keep the best solution (largest K) as the starting point for local search, but you can also attempt local search from the top 1–2 starts while time permits.
+
+4) Local search improvements (time-bounded, ARW-style with diversification)
+Maintain arrays for the current IS on the full graph (including peeled decisions):
+- inS[i] ∈ {0,1}; start from sel==1 plus the kernel greedy result.
+- fixed[i] = 1 if sel[i] != -1 from peeling; fixed vertices’ decisions must not change.
+- cnt[i] = number of neighbors of i currently in S.
+- par[i] = the unique neighbor in S if cnt[i]==1; special values: -1 for cnt==0, -2 for cnt>=2, -3 for inS.
+
+4a) Augmentation to ensure maximality
+- Maintain a queue of free vertices (inS==0 and cnt==0) that are not fixed; greedily add them to S; update cnt/par for neighbors; enqueue newly freed vertices as they appear. This must be fast and consistent and is used often (after swaps and perturbations).
+
+4b) Core (1,2)-swap move (improving move)
+- Randomly pick a pivot u ∈ S that is not fixed (sample several times).
+- Build candidate list A = { w ∉ S | cnt[w]==1 and par[w]==u }.
+- Try to find two non-adjacent vertices a, b ∈ A:
+  - Use neighbor lists (sorted) with a timestamped mark array: mark neighbors of a with current stamp; scan A to find b with mark[b] != stamp.
+  - For very high-degree a (e.g., deg[a] ≥ 1000), avoid O(deg) scans repeatedly: still use the same O(deg[a] + |A|) per trial with marks, but cap the number of trials per pivot to keep runtime bounded.
+- If found, perform the swap: remove u from S; add a and b; update cnt/par; then run augmentation to greedily add any new free vertices.
+- Accept improving swaps (|S| strictly increases) whenever found.
+
+4c) Diversification/perturbation (to escape local maxima)
+- If the search stagnates (e.g., no improvement after T tries or elapsed t since last improvement), perform a perturbation:
+  - Remove p random non-fixed vertices from S (e.g., p=1..3 based on N and time).
+  - Run augmentation to refill greedily.
+- Optionally also attempt occasional neutral (plateau) 1–1 swaps: pick v ∉ S with cnt[v]==1, remove par[v], add v, then immediately augment. Limit frequency (e.g., with probability 1/64) to avoid thrashing; this helps escape tight traps with minimal overhead.
+- Iterate the (1,2)-swaps and perturbations while respecting the time budget. Keep and update bestS/bestK each time you improve.
+
+5) Correctness and robustness
+- Always maintain cnt/par consistently upon add/remove:
+  - addToS(v): inS[v]=1; par[v]=-3; for each u in adj[v], increment cnt[u]; if cnt[u]==1 set par[u]=v; if cnt[u]==2 set par[u]=-2 (and keep ≥2 as -2).
+  - removeFromS(u): inS[u]=0; for each w in adj[u], decrement cnt[w]; if cnt[w]==0 set par[w]=-1 and enqueue for augmentation (if not fixed); if cnt[w]==1 recompute its unique neighbor in S to set par[w] correctly.
+- Peeling-fixed vertices must remain fixed in local search (never flip sel=1 to 0 or sel=0 to 1).
+- For temporary marking, use an int vector mark(N) with a global “stamp” integer to avoid O(N) clears; increment stamp per check.
+- Validation before printing: iterate all edges once; if any edge has both endpoints inS==1, the solution is invalid (should not happen). If invalid, fall back to a simple valid maximal IS (e.g., greedy by ascending degree) built quickly.
+
+Performance and implementation tips
+- Use mt19937_64 seeded with chrono::steady_clock::now().time_since_epoch().count().
+- Avoid O(N^2) operations. Use lazy heaps or proper bucket queues for dynamic degrees.
+- Ensure adjacency lists are sorted and unique; all mark-based adjacency checks depend on this.
+- Prefer contiguous vectors; avoid recursion; avoid per-iteration allocations in tight loops (reserve vectors or reuse buffers).
+- Guard all iterative/local-search loops with the time budget; exit at ~1.90–1.95s to be safe when printing.
+- Multi-start greedy constructions significantly improve K compared to a single start. Prior single-start + strict-improvement only approaches produced K much smaller than strong baselines (e.g., K_user ~ 0.65–0.76 of good K). Aim to close this gap by:
+  - 3–8 randomized greedy starts,
+  - aggressive augmentation after each,
+  - ARW-style (1,2)-swaps,
+  - periodic perturbations (small p) to re-diversify.
+
+What to deliver
+- A single self-contained C++17 source file that follows all the above.
+- Use fast I/O and strict time guard.
+- No extra prints or explanations; only output exactly N lines with 0/1 (one per line) when run.
+
+Checklist of critical pitfalls to avoid (seen in prior attempts)
+- Do not implement a bucket min-degree structure whose current_min pointer only increases; it must move down when degrees decrease, otherwise quality degrades severely.
+- Always keep cnt/par consistent after every add/remove; failing this breaks augmentation and swap correctness.
+- Ensure peeling updates dcur and queue correctly when removing paired degree-1 neighbors (avoid double-removes).
+- Ensure adjacency is sorted+unique; otherwise mark-based non-adjacency checks can be wrong and/or slow.
+- Limit per-iteration overhead in local search (e.g., cap trials per pivot, reuse buffers, avoid reallocation).
+- Keep best-so-far solution snapshot and restore/print it; don’t risk printing a non-maximal or invalid intermediate.
+
+Output format
+- Exactly N lines of 0 or 1 corresponding to vertices 1..N.

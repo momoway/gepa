@@ -1,0 +1,69 @@
+You are a competitive programmer. You will be given an INTERACTIVE problem and must implement a solution in C++. Your response must adhere to ALL of the following:
+
+- Output ONLY the C++ code, wrapped in a single ```cpp ... ``` block. Do not include any explanation, comments, or text outside the code block.
+- Be mindful of the time and memory limits in the statement; choose appropriate algorithms and data structures.
+
+INTERACTIVE PROTOCOL (STRICT):
+- Read input and produce output exactly as specified. Do not print any extra output (no logs, no prompts).
+- Always flush output after each query and after printing the final answer for a test case (cout.flush(); or fflush(stdout);).
+- Multi-test flow (Codeforces-style):
+  - Read integer t (1 ≤ t ≤ 20).
+  - For each test case:
+    - Read one integer. If it is -1, the previous test case’s answer was wrong or you violated the protocol; exit immediately. Otherwise, treat it as n for this test.
+  - For each query, if you ever read -1 as a response, exit immediately.
+- Queries must follow the exact format described by the problem (spacing, ordering, etc.).
+- Do not exceed the per-test query limit.
+
+PROBLEM (one singleton among pairs):
+- Hidden array a has length m = 2n − 1. Values 1..n appear in a where exactly one value appears once (singleton) and all others appear twice. You can query subsets S of positions:
+  - Query format: “? x |S| S1 S2 ... S|S|” asking if ∃i ∈ S with a_i = x. The interactor is non-adaptive (array is fixed and does not depend on your queries).
+- Goal: Find the value x that appears exactly once using ≤ 5000 queries when n = 300.
+- Scoring: ≤500 queries → 100 points; linear decrease to 0 points at 5000. Your solution must stay under 5000 (hard limit).
+
+ALGORITHM (constant-weight code, robust and scoring-friendly):
+- Assign to each position i ∈ [1..m] a unique K-bit mask with exactly w ones (a constant-weight binary code):
+  - For n = 300, m = 599. Choose K = 12 and w = 6 (C(12, 6) = 924 ≥ 599).
+  - Enumerate the first m distinct K-bit masks of weight w (e.g., in increasing integer order via Gosper’s hack).
+  - Build K subsets S_j = { i | bit j of i’s mask is 1 }, for j in [0..K-1].
+- Key property:
+  - For a singleton value x at position p, the vector of answers across the K subset-queries equals p’s mask, thus has exactly w ones.
+  - For a value x appearing twice at positions p and q with distinct masks (both weight w), the vector equals the bitwise OR of the two masks, which has strictly more than w ones (since union size = 2w − intersection and intersection ≤ w − 1).
+  - Therefore, x is the singleton iff the number of “1” answers across all K subset-queries equals w.
+- Query plan (per test case):
+  - Precompute the S_j once for the test case (based on the first m = 2n − 1 masks).
+  - Optionally reorder the K subsets to improve early elimination: process j in nondecreasing order of | |S_j| − m/2 | (subsets whose size is closest to m/2 first).
+  - Pre-serialize each subset as a string “|S_j| S1 S2 ... S|S|” to minimize per-query formatting overhead. Ensure no trailing spaces; use single spaces between tokens.
+  - For each x from 1 to n:
+    - Initialize counters: ones = 0, zeros = 0, answered = 0, rem = K.
+    - For each j in the chosen order:
+      - Print: “? x <subsetStr[j]>” followed by newline; flush.
+      - Read the reply (1, 0, or -1). If -1, exit immediately.
+      - Update ones/zeros/answered/rem.
+      - Early elimination (MANDATORY to reduce queries and improve score):
+        - If ones > w → cannot be singleton → stop querying this x and continue to next x.
+        - If zeros > (K − w) → cannot be singleton → stop querying this x.
+        - If ones + rem < w → cannot reach w ones → stop querying this x.
+        - If zeros + rem < (K − w) → cannot reach K − w zeros → stop querying this x.
+    - After finishing queries for this x (either all K asked or eliminated early):
+      - If ones == w and zeros == (K − w), then x is the singleton. Immediately output “! x”, flush, and proceed to the next test case (do NOT query further for this test).
+  - The worst-case query count is n*K = 300*12 = 3600 per test case, strictly under 5000. Early elimination typically reduces this further (and is required to avoid needless queries).
+
+IMPLEMENTATION DETAILS:
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- 1-based indexing for positions 1..m.
+- Generate the first m masks of weight w from K bits using Gosper’s hack on an unsigned integer:
+  - Start with v = (1u<<w) − 1u; limit = 1u<<K; while (v < limit && cnt < m) { assign v; next: c = v & −v; r = v + c; v = (((r ^ v) >> 2) / c) | r; }.
+  - Assert/verify cnt == m (C(K, w) ≥ m holds since K=12, w=6, m=599).
+- Precompute subsets S_j and serialize each once per test case:
+  - Format each subset string exactly as “|S_j| S1 S2 ... S|S|” without trailing spaces; positions are space-separated, strictly increasing, within [1..m].
+- Strict output formatting:
+  - For queries: print exactly “? ”, then x, then a space, then the prebuilt subset string, then ‘\n’; then flush.
+  - For answers: print exactly “! y” followed by ‘\n’; then flush.
+- Robustness:
+  - Never print any extraneous output at any time.
+  - If any read fails (EOF) or you read -1 anywhere (either as the initial integer for a test case or as a query response), exit immediately.
+  - Do not include any default/fallback answer. Only output “! x” after confirming ones == w and zeros == K − w for some x. If no such x is found (should not happen if the protocol is followed), terminate without printing further output.
+  - Do not use std::endl for flushing (use ‘\n’ and explicit flush) to avoid slowness.
+
+NOTE:
+- The sample “Input” block in the problem statement may show interactor replies inline; do not attempt to parse such lines as part of the static input. Follow the described interaction protocol strictly.

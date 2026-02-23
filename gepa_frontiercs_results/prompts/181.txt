@@ -1,0 +1,89 @@
+You are a competitive programmer. Implement an efficient C++17 solution for a single-instance Binary Quadratic Assignment Problem (BQAP) with strict adherence to I/O format and tight performance constraints.
+
+Your response must ONLY contain the C++ code wrapped in ```cpp ... ``` so that it is properly formatted, with no additional text. Any extra output or a non-permutation will cause a Wrong Answer.
+
+Problem summary and I/O:
+- Input:
+  - Line 1: integer n (2 ≤ n ≤ 2000)
+  - Next n lines: n integers (0/1): distance matrix D (n×n)
+  - Next n lines: n integers (0/1): flow matrix F (n×n)
+- Output:
+  - Exactly one line: a permutation p₁ … pₙ of {1..n} (1-based), where pᵢ = assigned location of facility i
+
+Scoring (do NOT print):
+- Cost = Σᵢ Σⱼ D[p(i), p(j)] * F[i, j]
+- TotalFlow = Σᵢ Σⱼ F[i, j]
+- score = 1 - Cost / TotalFlow
+
+Domain-specific constraints and guidance:
+- Matrices are binary (0/1), not necessarily symmetric or hollow.
+- n can be as large as 2000; memory must be frugal.
+  - Store D and F in flat contiguous arrays of unsigned char (byte) to fit in memory comfortably (~8 MB for both).
+  - Precompute base row indices base[i] = i * n to accelerate access.
+- Fast I/O is critical:
+  - Use a custom fast integer reader based on getchar_unlocked or fread (robust to arbitrary whitespace).
+  - If you use C stdio (fread/getchar_unlocked/putchar_unlocked/fwrite), do not include or call any C++ iostream APIs at all (not even ios::sync_with_stdio or cin/cout).
+  - Avoid per-integer formatted I/O and any stringstreams.
+- Use 0-based indices internally; convert to 1-based only for output.
+- Always produce a valid permutation of 1..n exactly once each, and print only that one line followed by '\n'.
+
+Initial solution construction (high-quality heuristic for binary BQAP):
+- For F:
+  - Compute row sums rowOnesF[i] and column sums colOnesF[j].
+  - degF[i] = rowOnesF[i] + colOnesF[i] (outgoing + incoming 1s).
+- For D:
+  - Compute row sums rowOnesD[i] and column sums colOnesD[j].
+  - zeroScoreD[j] = (n - rowOnesD[j]) + (n - colOnesD[j]) = 2n - rowOnesD[j] - colOnesD[j].
+- Sort facilities by descending degF (tie-break by index).
+- Sort locations by descending zeroScoreD (tie-break by index).
+- Map the i-th facility in that order to the i-th location in that order to form an initial permutation p.
+- Ensure the permutation is valid:
+  - Verify that each location is used exactly once; if any duplicates or unassigned elements are found (shouldn’t happen, but guard), repair by assigning remaining facilities to remaining locations arbitrarily (one-to-one).
+
+Local search improvement (pairwise swaps with O(n) delta evaluation):
+- Use a time budget for local search to avoid TLE; leave a buffer for I/O:
+  - Example heuristic budget (ms): n ≤ 200: ~700; ≤ 500: ~500; ≤ 1000: ~380; ≤ 1500: ~320; else: ~260.
+- Evaluate swap (a, b) of facilities a and b currently assigned to locations A = p[a], B = p[b] with O(n) delta using this formula:
+  - For each k != a, b with pk = p[k]:
+      delta += (F[a,k] - F[b,k]) * (D[B,pk] - D[A,pk])
+            + (F[k,a] - F[k,b]) * (D[pk,B] - D[pk,A])
+  - Add self/cross terms:
+      delta += (F[a,a] - F[b,b]) * (D[B,B] - D[A,A])
+            + (F[a,b] - F[b,a]) * (D[B,A] - D[A,B])
+  - Here F[x,y] and D[u,v] are 0/1, so differences are in {-1,0,1}; a 32-bit int is sufficient for delta.
+- Implementation tips for delta speed:
+  - Precompute base row indices base[i] = i*n (for both facility and location indices).
+  - Maintain an array rowBaseLoc[k] = base[p[k]] so D[pk, *] access is D[rowBaseLoc[k] + col].
+  - Use raw pointers to the flat arrays for hot loops; avoid lambdas and dynamic allocations inside the local search loop.
+- Neighborhood exploration strategy:
+  - Do not scan all O(n^2) pairs for large n. Use random sampling and/or candidate lists.
+  - Build a candidate facility set containing top-K by degF (e.g., K = min(n, max(64, n/8))).
+  - At each iteration, pick a from candidates most of the time (e.g., 75%) and otherwise uniformly from [0..n-1]; pick b uniformly from [0..n-1], b != a.
+  - Use first-improvement: if delta < 0, accept immediately, apply the swap, and continue.
+  - Update p[a], p[b] and rowBaseLoc[a], rowBaseLoc[b] upon acceptance.
+  - Optionally cap the number of consecutive non-improving attempts and/or sample only a small number of random b’s per a (ensure at least 1).
+- Determinism:
+  - Use a fixed RNG seed derived from n (e.g., xorshift*) to reduce variability and ensure repeatability.
+
+Edge cases:
+- If TotalFlow == 0 (all F entries are 0), any permutation is optimal; just output a valid permutation (e.g., the constructed initial permutation or identity).
+- Matrices are not guaranteed symmetric; use the directed formula above (both row and column interactions).
+- Ensure no undefined behavior for n up to 2000; avoid recursion and large stack allocations.
+
+Output:
+- Print exactly n space-separated integers p₁ … pₙ (each in [1..n]) on a single line, followed by '\n'.
+- Print nothing else (no debug, no logs, no trailing spaces or extra lines).
+- Use a buffered output (e.g., build into a pre-sized string or char buffer and fwrite once) for speed.
+
+Code constraints and compilation:
+- Target standard C++17 (-O2).
+- Do not include or use C++ iostreams at all if you use C stdio-based fast I/O; stick to one I/O family to avoid mixing.
+- Keep memory usage modest; unsigned char for matrices, int for indices, int64 only where necessary (e.g., summing TotalFlow).
+- Avoid heavy STL use in hot loops; no allocations inside the local search loop.
+
+Quality checklist before final print:
+- The permutation uses each location exactly once (validate or repair).
+- Indices converted to 1-based for output.
+- Fast reader correctly parses 0/1 integers separated by any whitespace.
+- Time budget respected; if time runs out, output the best found permutation so far.
+- Output exactly one line with the permutation and a trailing newline, and nothing else.

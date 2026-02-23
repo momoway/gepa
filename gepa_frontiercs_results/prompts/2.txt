@@ -1,0 +1,122 @@
+You are a competitive programmer. Implement a robust, query-efficient solution in C++17 for the interactive problem “Permutation” (aka “Piggy and Permutation”). Your output must be ONLY the C++ code, wrapped in a single ```cpp ... ``` block, with no additional text, comments, or blank lines beyond the protocol lines.
+
+Problem (non-adaptive interactor):
+- There is a fixed hidden permutation p of length n (1 ≤ n ≤ 1000).
+- You can ask queries; each returns the number of exact position matches with p.
+- Goal: reconstruct p in well under 10000 queries (target O(n log n), ~8k for n=1000).
+
+Interaction protocol (follow exactly):
+- Initially, read a single integer n from stdin.
+- To ask a query:
+  - Output one line: “0” followed by n integers a1..an (each in [1..n]); the line must contain exactly n integers after 0.
+  - Flush immediately (cout.flush()).
+  - Read a single integer x from stdin; x is the number of positions i where ai == p[i].
+  - If reading fails or EOF occurs at any time, exit the program immediately without any further output.
+- To make the final guess:
+  - Output one line: “1” followed by a valid permutation p1..pn (values 1..n in some order).
+  - Flush and exit immediately.
+- Absolutely no extra prints: only lines starting with 0 (queries) or a single final line starting with 1 (the guess), each followed by exactly n integers, newline, flush. No prompts, no debug, no extra whitespace-only lines.
+- For each query, print all n positions explicitly; rebuild the full query vector each time.
+- Never attempt to parse sample transcripts; only read n once at the start, then read exactly one integer x after each query you print.
+
+Core approach: two-value localization per pair with bitwise constraints + membership search + validation
+- Always use ONLY two distinct values (say a and b) within a query. Since p is a permutation, only positions of a and b can ever match; replies are in {0,1,2}. This prevents interference from other values.
+- Process values in disjoint pairs: (1,2), (3,4), ..., locating both positions per pair in O(log n) queries per value.
+- If n is odd, handle the leftover value by pairing it (virtually) with any already located value.
+
+Bitwise localization for a pair (a, b)
+- Index positions 1..n; for bitwise operations use idx = i - 1 (0-based).
+- Let B = smallest integer with (1 << B) ≥ n (so B ≤ 10).
+- For each bit d = 0..B-1, do a bit-test query using only a and b:
+  - Build query q of length n as:
+    - q[i] = a if (((i - 1) >> d) & 1) == 0
+    - q[i] = b otherwise
+  - Read reply x_d ∈ {0,1,2}. Interpret for bit d:
+    - x_d == 2 ⇒ bit of (pos[a] - 1) is 0 and bit of (pos[b] - 1) is 1
+    - x_d == 0 ⇒ bit of (pos[a] - 1) is 1 and bit of (pos[b] - 1) is 0
+    - x_d == 1 ⇒ bits of pos[a]-1 and pos[b]-1 are equal (both 0 or both 1)
+
+Build candidates and locate pos[a] via membership queries
+- From x_d for d = 0..B-1 build C_a = { i ∈ [1..n] | for all d:
+    - if x_d == 2 then (((i - 1) >> d) & 1) == 0
+    - if x_d == 0 then (((i - 1) >> d) & 1) == 1
+    - if x_d == 1 then no constraint
+  }
+- Important: Exclude any positions already assigned to other values from C_a to avoid collisions.
+- Note: With correct logic, pos[b] ∉ C_a (at least one bit differs).
+- Membership queries for a:
+  - For any subset S ⊆ C_a (never include any already-assigned positions), ask a query where q[i] = a if i ∈ S, else q[i] = b (for all i).
+  - Since pos[b] ∉ C_a and all i ∉ S are set to b, the reply is:
+    - x = 2 if and only if pos[a] ∈ S (matches at both pos[a] and pos[b])
+    - x = 1 otherwise (matches only at pos[b])
+  - Use binary search on C_a (split by halves) to find pos[a] in O(log |C_a|) queries (≤ B). If |C_a| == 1, no membership query is needed.
+  - If a membership query returns a value outside {1,2}, or input fails, exit immediately.
+
+Recover and validate pos[b]
+- Let ba_d be bit d of (pos[a] - 1).
+- For each d:
+  - If x_d == 2 ⇒ bb_d = 1
+  - If x_d == 0 ⇒ bb_d = 0
+  - If x_d == 1 ⇒ bb_d = ba_d
+- Combine bits: idx_b = sum_d (bb_d << d). Then pos[b] = idx_b + 1.
+- Validate pos[b]:
+  - 1 ≤ pos[b] ≤ n
+  - pos[b] ≠ pos[a]
+  - ans[pos[b]] is unassigned or already b
+- If validation fails, or to be extra safe, locate b via its own candidate set C_b and membership search:
+  - C_b = { i ∈ [1..n] | for all d:
+      - if x_d == 2 then (((i - 1) >> d) & 1) == 1
+      - if x_d == 0 then (((i - 1) >> d) & 1) == 0
+      - if x_d == 1 then no constraint
+    } \ {pos[a]} \ {already-assigned positions}
+  - Membership queries for b: q[i] = b if i ∈ S, else q[i] = a; reply is 2 iff pos[b] ∈ S (since pos[a] ∉ C_b). Binary search on C_b.
+
+Per-pair verification (to avoid subtle WA while staying <10k queries)
+- After determining pos[a] and pos[b], issue one verification query using only a and b:
+  - Build q as: q[pos[a]] = a, q[pos[b]] = b, and fill all other positions with b (or a). The expected reply is x = 2.
+  - If x != 2, resolve by re-running the membership search on both C_a and C_b (recomputed with assigned-position exclusions). This adds at most one query per pair (~+500 total), keeping total queries well under 10000 (empirically ~8k for n=1000).
+
+Handle odd n (one leftover value v)
+- If n is odd, one value v remains unplaced. Pick any already located value w (ensure its position is known).
+- For each bit d = 0..B-1, issue the bit-test with only v and w:
+  - Build q as: q[i] = v if (((i - 1) >> d) & 1) == 0; else q[i] = w.
+  - Read x_d ∈ {0,1,2}. Let bw be bit d of (pos[w] - 1). Then:
+    - x_d = (bv == 0 ? 1 : 0) + (bw == 1 ? 1 : 0) = 1 + bw - bv
+    - Solve bv = 1 + bw - x_d (bv ∈ {0,1})
+- Combine bits bv to form idx_v, pos[v] = idx_v + 1.
+- Validate pos[v]:
+  - 1 ≤ pos[v] ≤ n
+  - ans[pos[v]] is unassigned or already v
+- If invalid/occupied, rebuild a precise candidate set for v from these bit constraints and exclude already-assigned positions, then locate via membership queries against w:
+  - For S ⊆ candidates, set q[i] = v if i ∈ S, else q[i] = w; reply is 2 iff pos[v] ∈ S (since pos[w] ∉ candidate set if w’s position is excluded). Binary search.
+- Optionally issue one verification query for (v, w) exactly as in the pair verification (expected x = 2).
+
+Implementation and safety constraints
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Maintain:
+  - ans[1..n], where ans[pos] = value at position pos (the final permutation to print)
+  - pos_of_value[1..n], where pos_of_value[val] = position of that value (0 if unknown)
+  - A set/bitset of occupied positions to exclude from candidate sets and splits
+- Helper ask(q):
+  - Print: 0 followed by all n integers in q (each ∈ [1..n]) in one line.
+  - Flush (cout.flush()).
+  - Read a single integer x; if reading fails or EOF, exit immediately.
+  - For safety, if x < 0 or x > n, exit immediately.
+- Always rebuild the entire query array for every ask; initialize all n positions in each query.
+- In every query, use ONLY the two values of the current pair. Do not use any third value anywhere.
+- Compute B = smallest integer with (1 << B) ≥ n. Use 0-based bit operations on (i - 1).
+- Edge cases:
+  - If n == 1, immediately print “1 1”, flush, and exit.
+  - If a candidate set unexpectedly becomes empty, or a membership query returns a value outside {1,2}, terminate immediately (no extra prints). Alternatively, try locating the other value first (C_b) then deduce.
+  - Never overwrite an already-assigned different value at a position; instead, recompute via the opposite value’s candidate set and/or re-run membership search.
+- Final output:
+  - After determining all positions, print the final guess as:
+    - “1” followed by ans[1], ans[2], ..., ans[n] (space-separated), newline, flush, and exit. Do not read further input after printing the guess.
+
+Critical coding constraints to avoid judge errors:
+- Do NOT define a function named terminate (conflicts with std::terminate). If you need an immediate-exit helper, name it differently (e.g., bye(), die(), or safe_exit()) and implement it as exit(0).
+- Ensure vectors used for queries are sized exactly n, and every position 1..n is assigned a value in [1..n] for each query.
+- All outputs must strictly match the interactive protocol: only lines starting with 0 (queries) or a single final line starting with 1 (the guess), each followed by exactly n integers, then newline and flush. Absolutely no extra prints, spaces-only lines, or debug output.
+
+Deliverable:
+- Output ONLY the complete, self-contained C++17 program implementing the above, wrapped in a single ```cpp ... ``` block, with no additional commentary. The program must adhere to the interaction protocol and implement the pairwise bitwise localization, membership binary search with assigned-position exclusions, and per-pair verification to ensure correctness within ~8k queries for n=1000.

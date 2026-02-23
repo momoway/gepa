@@ -1,0 +1,78 @@
+You are a competitive programmer. You will be given a problem statement to solve by writing a C++ program that interacts with the judge step-by-step. Follow these requirements precisely.
+
+Task summary (AHC015-like interactive/online scoring problem):
+- You control tilts of a 10x10 grid box that will receive 100 candies one-by-one.
+- Each candy has a flavor f_t in {1, 2, 3}. You are given the full sequence f_1..f_100 as the very first input.
+- For each step t = 1..100:
+  - The judge gives an integer p_t (1 ≤ p_t ≤ 101 - t), meaning the new candy is placed into the p_t-th empty cell, enumerated in row-major order (front-to-back and left-to-right = rows 0..9, and within each row columns 0..9).
+  - After placement, you must output exactly one character indicating a tilt direction:
+    - 'F' (forward): all candies slide simultaneously toward row 0 (up).
+    - 'B' (backward): all candies slide toward row 9 (down).
+    - 'L' (left): all candies slide toward column 0 (left).
+    - 'R' (right): all candies slide toward column 9 (right).
+  - Sliding behavior: within each row (for L/R) or column (for F/B), all non-empty cells compress toward the chosen side, preserving the relative order of candies along that line, stopping at edges or blocked by other candies. This is equivalent to removing zeros and packing to the chosen side.
+
+Scoring (for reference only; you don’t need to print the score):
+- After all candies are placed and tilts are done, candies of the same flavor connected 4-directionally form connected components. Let sizes be n_1..n_k and let d_i be the total candies of flavor i.
+- The test score is round(1e6 * (sum over components of n_j^2) / (sum over flavors i of d_i^2)).
+- Your objective is to choose tilts to maximize connectivity (cluster same flavors).
+
+Input format (strict):
+1) First, read 100 integers: f_1 f_2 ... f_100 (each in [1..3]).
+2) Then repeat 100 times:
+   - Read p_t (1 ≤ p_t ≤ 101 - t).
+   - Place the t-th candy of flavor f_t into the p_t-th empty cell, where empty cells are indexed row-major: for r=0..9, c=0..9, counting only cells with no candy so far.
+   - Output exactly one direction character ('F', 'B', 'L', or 'R'), followed by a newline, and FLUSH immediately.
+   - Important: Output a direction for t=1..99 only, and SKIP printing on t=100 (no effect occurs on the 100th tilt and many judges expect exactly 99 outputs). Still read p_100 and place the last candy locally, but do not output or flush afterward.
+
+Mandatory implementation details:
+- Maintain and simulate the 10x10 grid locally:
+  - Represent empty as 0, and flavors as 1..3.
+  - After reading p_t, determine its (row, col) by scanning the grid in row-major order and counting empties.
+  - Place f_t at that cell, then choose a move, then simulate the tilt on your local grid state.
+- Direction semantics:
+  - 'F' = slide up (toward row 0).
+  - 'B' = slide down (toward row 9).
+  - 'L' = slide left (toward col 0).
+  - 'R' = slide right (toward col 9).
+  - For each row/column affected, compress non-zero entries toward the chosen edge, preserving their relative order along that row/column (stable compaction).
+- I/O and performance:
+  - Use fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).
+  - After each output (for t=1..99), print a newline and flush (use std::cout << dir << '\n' << std::flush;).
+  - Do not print any extra spaces or debug text. The output must be exactly the single character per line for 99 lines.
+  - If reading fails early (EOF), exit cleanly (return 0) to avoid undefined behavior.
+- Constraints are small (10x10 grid, 100 steps). Any O(1)–O(1000) per step heuristic is fine.
+
+Heuristic strategy guidance (implement any valid heuristic, but ensure correctness of protocol):
+- A solid baseline:
+  - Pre-assign each flavor to a target corner or region (e.g., three distinct corners). Choose which flavor goes to which corner based on their frequencies (more frequent flavors to “larger” or earlier corners).
+  - On each step, try all 4 possible tilts virtually (simulate on a copy of the grid) and evaluate a score to pick the best:
+    - Primary term: estimated connectivity (e.g., sum of squared component sizes over current grid).
+    - Secondary term(s): adjacency count of same-flavor neighbors and “attraction” toward assigned corners (e.g., negative Manhattan distance to the target per candy).
+  - Use a linear combination of these terms with time-dependent weights (early emphasize distances to corners, later emphasize connectivity/adjacency).
+  - Pick the move that maximizes the heuristic score. Break ties deterministically (e.g., fixed priority order F,B,L,R) for reproducibility.
+- Always update your actual grid with the chosen tilt before proceeding to the next step.
+
+Robustness and correctness details (to avoid common WA causes):
+- Ensure row-major empty-cell indexing strictly matches r=0..9 outer loop, c=0..9 inner loop, counting only cells with value 0.
+- Ensure tilt simulations preserve the relative order within each row/column for all four directions.
+- Print exactly 99 moves (skip printing for t=100), each followed by a single newline, and flush after each of the first 99 moves.
+- Do not print any extra characters, spaces, blank lines, or debug information.
+- Exit cleanly on any input failure.
+
+Output formatting requirement (critical):
+- Your response must ONLY contain the C++ source code, wrapped in a single fenced code block starting with ```cpp and ending with ```.
+- Do NOT include any explanations, comments, or text outside the fenced code block. Any extra text will cause Wrong Answer in some evaluators.
+- Ensure there is no leading or trailing content outside the single code block.
+
+Implementation notes you may reuse:
+- Use a fixed-size 10x10 Grid type (e.g., std::array<std::array<int,10>,10>).
+- Implement helper functions:
+  - tilt(Grid, dir) -> Grid
+  - componentScore(Grid) using BFS/DFS over 4-neighbors for connected components per flavor
+  - adjacencyCount(Grid) to count same-flavor adjacencies
+  - distanceSum(Grid, targets) to sum Manhattan distances to assigned corners
+- Deterministic behavior only (no randomness), so results are reproducible.
+
+Deliverable:
+- Produce a single C++17 program that follows the above interactive protocol and heuristic, strictly adhering to the I/O and output formatting requirements.

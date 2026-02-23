@@ -1,0 +1,76 @@
+You are a competitive programmer. You will be given one test case of an AtCoder Heuristic Contest problem (AHC005-like). Implement a robust, legal, and reasonably good heuristic solution in C++. The execution time and memory are limited (typ. ~2s, a few hundred MB), so be careful with complexity. Your response must be ONLY the C++ code wrapped in ```cpp ... ``` with no extra text.
+
+Problem (reconstructed):
+- Grid N x N (N odd, typically 49..69).
+- Coordinates: (0,0) top-left; (i,j) is i-th row, j-th column.
+- Each cell is either:
+  - Road with a character '5'..'9' = time cost to enter that cell from an adjacent road cell.
+  - Obstacle '#'.
+- Start position (si, sj) is guaranteed to be a road.
+- You can move U/D/L/R between adjacent road cells; moving to cell X has cost cost[X] ∈ {5..9}.
+- Visibility: From a cell (i,j), you can see all road cells in:
+  - Same row i, if every intervening cell (i, k) between j and j' is a road (i.e., same contiguous road segment in the row).
+  - Same column j, if every intervening cell (k, j) between i and i' is a road (i.e., same contiguous road segment in the column).
+- Task: Output a route (string of 'UDLR') that starts at (si, sj), only moves on road cells, and returns to (si, sj), such that all road cells become visible at least once (or as many as possible if you can’t). It is always legal to revisit cells and U-turn.
+
+Scoring (for context; you do not need to print score):
+- Let r = # of road cells in the (reachable) map, v = # visible road cells your route achieves, t = total travel time.
+- If v < r: score ~ 1e4 * v/r (rounded).
+- If v = r: score ~ 1e4 + 1e7 * N / t (rounded).
+- Invalid output (leaving grid, touching '#', or not returning to start) yields WA and zero score across all cases. Always ensure legality.
+
+Key domain-specific insight (critical for a strong baseline):
+- A “visibility segment” is a maximal contiguous block of road cells in a row (row segment) or in a column (column segment).
+- Standing on any cell of a row segment makes the entire row segment visible; similarly for a column segment.
+- Each road cell belongs to exactly one row segment R and one column segment C.
+- A road cell becomes visible if either its row segment R or its column segment C has been “touched” by your route (you stood on any cell of that segment).
+- Therefore, selecting a minimum set of segments (some rows and/or columns) so that every road cell has at least one of its two segments selected is exactly the minimum vertex cover of a bipartite graph:
+  - Left vertices = row segments, Right vertices = column segments.
+  - Each road cell corresponds to an edge (R_i, C_j).
+  - By Kőnig’s theorem, min vertex cover size = maximum matching size; you can find the min cover via Hopcroft–Karp + standard extraction.
+
+Recommended robust baseline algorithm:
+1) Read N, si, sj and grid.
+2) Build a mask of road cells and restrict to the connected component reachable from (si, sj) via 4-neighbor road adjacency (BFS/DFS). Ignore other components (the official generator keeps only the largest component; this is safety).
+3) Identify row segments:
+   - For each row i, scan j=0..N-1; whenever you find a maximal run of road cells within the reachable component, assign it a unique row-segment id.
+4) Identify column segments similarly; assign unique column-segment ids.
+5) Build a bipartite graph:
+   - For each reachable road cell (i,j), add an edge between its row-segment id and column-segment id.
+6) Compute maximum bipartite matching using Hopcroft–Karp.
+7) Extract a minimum vertex cover (Left \ Z) ∪ (Right ∩ Z), where Z is the set of vertices reachable from unmatched left vertices via alternating paths in the directed graph defined by the matching.
+   - The chosen set S of segments (row and/or column) is a minimum set that covers all reachable road cells by visibility.
+8) Route planning to visit at least one cell from each chosen segment S:
+   - While not all segments in S are “covered” (i.e., you have not yet stepped on any cell of that segment):
+     - Run a single-source Dijkstra from your current position over the reachable road cells. Edge cost to move to neighbor is the destination cell’s cost digit.
+     - Among uncovered segments, pick the one with the nearest distance to any of its cells; choose the specific target cell for that segment minimizing the Dijkstra distance.
+     - Reconstruct the path via parent pointers and append corresponding 'UDLR' moves to your output. As you walk, mark any row/column segments encountered as covered (this often covers multiple segments for free).
+   - After covering all S, Dijkstra back to (si, sj) and append moves to return.
+   - This greedy nearest-target approach balances quality and simplicity. It runs Dijkstra O(|S|) times on ≤ N*N nodes, which is fine for N up to ~70.
+9) Always ensure legality:
+   - Do not produce moves out of bounds or onto '#'.
+   - End exactly at (si, sj).
+   - If anything unexpected happens (e.g., no reachable targets due to logic error), fall back to immediately returning to start (or even output an empty string, which is legal and returns to start).
+10) Performance notes:
+   - Use 64-bit (long long) for distances; worst-case path cost can accumulate.
+   - Use adjacency with 4 directions; precompute char-to-cost (digit - '0').
+   - Avoid expensive all-pairs computations; only run Dijkstra from the current node.
+   - You can keep a small time guard using chrono to ensure you always finish and return to start.
+
+Implementation details:
+- Input format:
+  - N si sj
+  - Then N strings c_0..c_{N-1} of length N with chars in {'5','6','7','8','9','#'}.
+- Output format: A single line string consisting only of 'U', 'D', 'L', 'R'.
+- Movement encoding: 'U' moves (i,j)->(i-1,j), 'D': (i+1,j), 'L': (i,j-1), 'R': (i,j+1).
+- Costs: Moving into (ni,nj) costs (grid[ni][nj]-'0'); ignore costs of departure cell.
+
+Robustness:
+- Sanity-check that the reconstructed path strictly follows road cells.
+- Track current position while building the output string to avoid inconsistencies.
+- If the minimum vertex cover or routing fails (should not), output an empty string (legal: start and end are the same).
+
+Code requirements:
+- Implement Hopcroft–Karp for bipartite matching and min vertex cover extraction.
+- Implement Dijkstra with parent reconstruction and move translation.
+- No debugging prints. Output only the move string. Wrap the C++ code in ```cpp ... ``` fences.

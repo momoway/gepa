@@ -1,0 +1,105 @@
+You are a competitive programmer. You will be given exactly one test with two integers n and m (1 ≤ n, m and n·m ≤ 100000). Your job is to print a rectangle-free set of cells in an n×m grid that is deterministic, valid, and as large as possible (high-scoring under the judge’s bound).
+
+RESTATE THE TASK (what you must output)
+- Choose a set S of distinct cells (r, c), 1 ≤ r ≤ n, 1 ≤ c ≤ m.
+- No four cells may form the corners of an axis-parallel rectangle: there do not exist r1 ≠ r2 and c1 ≠ c2 such that all four (r1,c1), (r1,c2), (r2,c1), (r2,c2) ∈ S.
+- Output format:
+  - First line: k (the number of chosen cells).
+  - Next k lines: ri ci.
+  - No extra text or blank lines. Deterministic order only (stable across runs).
+
+SCORING (what we optimize; judge behavior)
+- Upper bound used by the judge: U(n,m) = floor(min(n·sqrt(m) + m, m·sqrt(n) + n, n·m)).
+- Your score per test is 100 × min(k / U(n,m), 1). The judge may label results as “Wrong Answer” even for valid outputs that are not optimal; truly invalid outputs (out of range, duplicates, or forming a rectangle) score 0. Maximize k while staying valid and deterministic.
+
+CORE, PROVEN-SAFE CONSTRUCTIONS (build many valid candidates, keep the largest)
+Use two symmetric “affine lines modulo a prime” families. Each family limits intersections on one axis, guaranteeing ≤ 1 common row for any column-pair (or ≤ 1 common column for any row-pair). Build multiple parameterizations and pick the best by realized k after full build + augmentations.
+
+A) Columns-centric affine-lines (control intersections per pair of columns)
+- Pick an integer L (number of row-groups). Partition rows into L consecutive groups, each of size G = ceil(n / L) so that L·G ≥ n.
+- Let P = nextPrime(max(2, L)). We strongly prefer parameters with P ≤ G (see search below).
+- Parameterize up to P² structured columns by (a, b), with a ∈ {0..P−1}, b ∈ {0..P−1}, assigned in fixed lexicographic order to the first structured = min(m, P²) grid-columns:
+  - For column index idx ∈ [0..structured−1]: a = idx / P, b = idx % P, and actual grid column c = idx (0-based; output c+1).
+- For each structured column (a, b) and each group i ∈ {0..L−1}:
+  - Compute j = (a·i + b) mod P (use 64-bit during multiply, cast down).
+  - If j < G, compute r = i·G + j (0-based). If r < n, add (r+1, c+1).
+  - Note: When P ≤ G, the filter j < G always passes, giving exactly one row per group (L cells per structured column before tail clipping). When P > G, acceptance probability ~ G/P; this is why we prioritize L with nextPrime(L) ≤ G.
+- For remaining columns (c = structured..m−1), add exactly one singleton per column in a simple deterministic pattern, e.g., r = c % n (0-based); add (r+1, c+1). A singleton cannot create the second shared row needed for a rectangle, so this is safe.
+- Strong safe augmentation (columns with degree 0 across all columns, including structured ones): After building this candidate, compute the degree per column c. For every column with degree 0, add exactly one cell in a fixed row (e.g., (1, c)). This is safe because each such column had global degree 0; adding it into a single fixed row cannot give any column-pair a second shared row.
+- Safe augmentation (rows with degree 0): After the above, detect all rows that have no chosen cell anywhere. For each such row r, add (r, 1). This is safe because they were globally unused before, so no pair of columns gains a second common row.
+
+B) Rows-centric affine-lines (symmetric; control intersections per pair of rows)
+- Pick an integer L (number of column-groups). Partition columns into L consecutive groups, each of size G = ceil(m / L) so that L·G ≥ m.
+- Let P = nextPrime(max(2, L)). Prefer P ≤ G.
+- Parameterize up to P² structured rows by (a, b) as above and assign to the first structured = min(n, P²) grid-rows in fixed lexicographic order:
+  - For row index idx ∈ [0..structured−1]: a = idx / P, b = idx % P, and actual grid row r = idx (0-based; output r+1).
+- For each structured row (a, b) and each group i ∈ {0..L−1}:
+  - Compute j = (a·i + b) mod P. If j < G, set c = i·G + j (0-based). If c < m, add (r+1, c+1).
+- For remaining rows (r = structured..n−1), add one singleton per row: c = r % m (0-based); add (r+1, c+1).
+- Strong safe augmentation (boosts score substantially when m ≫ n): After the base build, mark all columns with degree 0 (no chosen cell in them). Add all such globally uncovered columns to a single fixed row (e.g., row 1): add (1, c+1) for every uncovered c. This is safe because each of these columns had degree 0; adding each to one fixed row cannot produce a second shared column for any row pair.
+- Optional symmetric augmentation: If some rows remain completely unused (can happen when P > G or due to bounds), add them to a single fixed column (e.g., column 1) as in A. This is safe for the same reason (globally unused before the augmentation).
+
+WHY THIS IS RECTANGLE-FREE (proof sketch you must rely on)
+- For a fixed prime P and L ≤ P: Given two distinct parameter pairs (a1, b1) ≠ (a2, b2), the congruence a1·i + b1 ≡ a2·i + b2 (mod P) has at most one solution i ∈ {0..P−1}. Since i ranges over 0..L−1 with L ≤ P, two distinct structured columns intersect in at most one row; similarly, two distinct structured rows intersect in at most one column. The j < G filter and in-bounds checks only remove cells; they cannot create extra intersections.
+- Singletons: One cell per leftover column (or row) does not create a second shared row (or column), hence cannot complete an axis-parallel rectangle.
+- Augmenting globally unused rows into a single column, or globally uncovered columns into a single row, is safe: those coordinates had degree 0 before augmentation, so no row- or column-pair gains a second common coordinate.
+
+PARAMETER SEARCH (critical for high scores across n, m)
+- Good performance typically occurs when P ≤ G; if P > G the acceptance rate per index i drops to about G/P. Actively prefer L with nextPrime(L) ≤ ceil(size / L), where size = n for columns-centric and size = m for rows-centric.
+- For each family (columns-centric and rows-centric), generate a rich, deterministic set of L candidates and keep the best by realized k after full build + augmentations:
+  - Base around square root of the controlled dimension: Let L0 = floor(sqrt(size)). Try a wide window L ∈ {L0 + d | d ∈ {−32..+32}} clamped to [1..size].
+  - Add divisor-like choices: floor(size / t) for t ∈ {2..48}, clamped to [1..size].
+  - Always include L = 1, and L = min(size, max(1, round(sqrt(size)))) explicitly.
+  - For each L gathered, if nextPrime(L) > ceil(size / L), deterministically decrement L → L' down to the largest L' ≥ 1 such that nextPrime(L') ≤ ceil(size / L') (if it exists). Include both the original L (to not miss rare good cases) and the fixed L'.
+  - Also include the largest L ≤ floor(sqrt(size)) that satisfies nextPrime(L) ≤ ceil(size / L) (if it exists), along with its neighbors L ± 1 (clamped and filtered).
+  - Hedge on the other dimension: include floor(sqrt(other)), floor(1.5·sqrt(other)), floor(2·sqrt(other)) if within [1..size], where other = m for columns-centric and other = n for rows-centric.
+- For each candidate L of each family:
+  - Build the candidate deterministically as above.
+  - Perform BOTH augmentations described for that family:
+    - Columns-centric: add one singleton for each leftover (c ≥ structured) column; then add one cell to every globally uncovered column (including possibly some structured columns) into a single fixed row (row 1); then add all globally unused rows into a single fixed column (column 1).
+    - Rows-centric: add one singleton per leftover row; then add every globally uncovered column into a single fixed row (row 1); then optionally add all globally unused rows into a single fixed column (column 1).
+  - After building and performing augmentations, sort the vector of (r, c) pairs and erase duplicates (sort+unique). This guarantees the final set size equals what you measure and avoids duplicate-printing penalties.
+  - Validate bounds (1 ≤ r ≤ n, 1 ≤ c ≤ m) before pushing any pair.
+  - Keep the best candidate by size across all:
+    - All columns-centric candidates (with both augmentations).
+    - All rows-centric candidates (with both augmentations).
+    - The star fallback (defined below).
+  - Deterministic tie-breaking: If sizes tie, prefer the rows-centric candidate when m ≥ n, else prefer the columns-centric. If still tied, prefer the smaller L. If still tied, compare the sorted (r, c) vectors lexicographically and prefer the smaller.
+
+ALWAYS-VALID FALLBACKS (must be implemented)
+- If n == 1 or m == 1: Output all n·m cells (no rectangle possible). Optimal and trivial.
+- If min(n, m) == 2: Output the “star”: all cells in row 1 plus all cells in column 1 (skip duplicate (1,1)), totaling n + m − 1. This is optimal on any 2-line grid.
+- General star fallback for any n, m: all of row 1 and all of column 1 (skip (1,1)). Always valid; include it as a candidate (n + m − 1 cells).
+
+IMPLEMENTATION REQUIREMENTS (C++17)
+- Single translation unit, C++17, fast IO, and 64-bit integers where multiplying (e.g., a·i).
+- Data structures: Collect cells in vector<pair<int,int>>; reserve generously (≤ n·m + O(n + m)).
+- After finishing each candidate (including all augmentations), do sort(v.begin(), v.end()); v.erase(unique(v.begin(), v.end()), v.end()).
+- Use int for coordinates; use long long for intermediate modular multiplications.
+- nextPrime(x): simple deterministic trial division up to floor(sqrt(x)) is sufficient (x ≤ max(n, m), and the search window is small).
+- Strict determinism: no RNG; fixed iteration orders for L, for (a, b), for groups, and for augmentations. Fixed augmentation targets: row 1 and column 1 only.
+- Complexity: With n·m ≤ 1e5 and O(sqrt(size)) many L tested per family, total time and memory remain well within limits. Avoid per-candidate O(n·m) scans; compute degrees by a single pass over the candidate vector.
+
+OPTIONAL VALIDATION (for safety during construction; keep linear-ish)
+- If you implement a sanity checker for rectangles, use the standard “row-pair of columns” method:
+  - Build for each row the sorted list of columns it has.
+  - For each row, iterate all column-pairs (c1, c2) within that row and hash them (e.g., key = 1LL * c1 * (m+1) + c2) into an unordered_set. If a pair appears again, it would form a rectangle; discard this candidate.
+  - Because n·m ≤ 1e5 and our constructions keep per-row degrees ≈ O(sqrt(other)) except one fixed row used for augmentation, this is usually fast enough; but if you’re tight on time, skip this checker and rely on the proven-safe constructions and guardrails above.
+
+SAFETY GUARDRAILS
+- Never add extra cells to existing active rows/columns except:
+  - one singleton per leftover column/row; or
+  - adding all globally unused rows to a single fixed column; or
+  - adding all globally uncovered columns to a single fixed row; or
+  - (columns-centric only) adding one singleton to every globally uncovered column (degree 0) in a single fixed row.
+  These precisely preserve the “intersection ≤ 1” invariant needed to avoid rectangles.
+- Always verify each (r, c) is within [1..n] × [1..m] before pushing.
+- Confirm that the final printed count equals exactly the number of printed pairs after sort+unique.
+
+TIE TO THE UPPER BOUND INTUITION (why this approach scores well)
+- When m ≥ n, rows-centric with L ≈ sqrt(m) and P ≤ G yields ~n·L baseline cells; the uncovered-column augmentation adds up to m more, pushing k near n·sqrt(m) + m ≈ U(n, m).
+- When n ≥ m, columns-centric with L ≈ sqrt(n) and P ≤ G yields ~m·L baseline cells; adding singletons to leftover columns, then filling any remaining degree-0 columns, and adding all unused rows push k near m·sqrt(n) + n ≈ U(n, m).
+- Testing multiple nearby and divisor-shaped L and enforcing P ≤ G where possible is crucial to avoid performance dips on adversarial dimensions.
+
+DELIVERABLE
+- Print ONLY the C++17 solution (no comments or debug), implementing the above exactly.

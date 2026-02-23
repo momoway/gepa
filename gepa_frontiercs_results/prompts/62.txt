@@ -1,0 +1,118 @@
+You are a competitive programming assistant. Implement a correct and efficient C++ solution for the “Ball Moving Game” constructive problem using the exact I/O protocol below. Your response must be only a single C++17 program wrapped in one ```cpp ... ``` fenced block with no extra commentary.
+
+Problem (precise restatement compatible with the judge):
+- There are n + 1 pillars indexed 1..n+1. Each of the first n pillars initially has m balls stacked from bottom to top; pillar n+1 starts empty.
+- There are n colors labeled 1..n, with exactly m balls of each color (total n*m balls).
+- Operation: You may move only the top ball of pillar x to the top of pillar y if:
+  - pillar x is non-empty,
+  - pillar y currently has at most m-1 balls (dest size < m),
+  - x ≠ y and both are within [1..n+1].
+- Goal: Output a sequence of moves that ends with all m balls of each color gathered onto a single pillar (which pillar per color does not matter), while never exceeding the capacity m on any pillar, and using at most 10^7 moves.
+
+Input format:
+- First line: two integers n and m.
+- Next n lines: each contains exactly m integers, the colors on pillar i from bottom to top (the first number is bottom; the last number is top). Do not reverse this order when reading. Pillar n+1 is initially empty.
+
+Output format:
+- First line: integer k (0 ≤ k ≤ 10^7), the number of moves.
+- Next k lines: each has two integers x y meaning “move the top ball from pillar x to pillar y” (1 ≤ x, y ≤ n+1, x ≠ y).
+- No extra text allowed.
+
+Absolute requirements:
+- Do not output an empty/trivial solution unless you have verified the initial configuration already satisfies the goal (each color 1..n appears only on a single pillar, and those pillars are pure).
+- Read input exactly as specified; represent each pillar as a stack with back() as the top.
+- Implement a move_ball(x, y) helper that:
+  - Checks preconditions at runtime (source non-empty, dest not full, x ≠ y, indices in range).
+  - Pops top from pile x and pushes to pile y.
+  - Records the move to an output vector.
+  - Enforces a global move count limit ≤ 10^7.
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+
+Representation and helpers to include:
+- Use vector<vector<int>> pile(n+2); pile[i].back() is the top.
+- Let B = n+1 be the permanent buffer pillar.
+- Maintain vector<bool> frozen(n+2,false) marking pillars already dedicated to a finished color. Never freeze B.
+- Maintain vector<bool> color_done(n+2,false).
+- Helper functions:
+  - move_ball(int x, int y) with runtime checks and move cap.
+  - top_color(i): returns top color or -1 if empty.
+  - contains_color(i, c): whether pile i contains color c.
+  - count_color_in_pile(i, c): count of c in pile i.
+  - nearest_depth_from_top(i, c): number of balls above the nearest c from the top (INT_MAX/4 if none).
+  - swap_top(a, r): 3-move swap via B (B must be empty; a != r; r non-empty): move_ball(r, B); move_ball(a, r); move_ball(B, a). Leaves B empty.
+
+Core constructive strategy (deterministic, capacity-safe; O(n * m^2) to O(n^2 * m), within ≤1e7 moves for typical constraints):
+- Always keep the buffer pillar B empty between macros. Never move from frozen pillars.
+- Solve colors one by one; for each color c, permanently dedicate one non-B pillar T (target) to gather all m balls of color c, then freeze it.
+
+CRUCIAL SELECTION RULE TO AVOID DEADLOCKS:
+- Never pick a color c to process if every unfrozen pillar’s top is c. Formally, let U be the set of unfrozen pillars in [1..n]. If for color c, for all i in U with pile[i] non-empty, top_color(i) == c, skip c for now. There is always some other color d with at least one unfrozen top != d (at most one color can occupy all unfrozen tops at once). This avoids the pathological “mode-3” state and guarantees availability of a pillar R with top != c when needed. If eventually no such color exists, it means only one color remains among unfrozen pillars; in that case all remaining non-empty unfrozen pillars are already pure of that color, so the phase will trivially finalize by freezing its target (see verification).
+
+Per-color phase for color c:
+1) Choose target pillar T among unfrozen pillars in [1..n] (never choose B). Prefer the one with the largest count of color c; ties arbitrary.
+   - If count_color_in_pile(T, c) == m and T is already pure color c, mark frozen[T] = true; color_done[c] = true; continue to next color.
+
+2) While count_color_in_pile(T, c) < m:
+   - Ensure B is empty before each macro.
+
+   Case A: T has available space (pile[T].size() < m):
+     // Simple extraction macro (safe even if T is empty or T.top == c)
+     - Pick a source pillar S ≠ T, S unfrozen, that contains at least one c. Prefer minimal nearest_depth_from_top(S, c).
+     - Perform:
+       1) move_ball(S, B);                               // free one slot on S
+       2) while (top_color(S) != c) move_ball(S, B);     // peel S into B until c on top; B size ≤ m
+       3) move_ball(S, T);                               // place c onto T (T had space)
+       4) while (!pile[B].empty()) move_ball(B, S);      // restore S; B becomes empty
+     - This increases the number of c on T by +1, never exceeds capacities, and leaves B empty. S ends with one free slot (size m-1), which is fine.
+
+   Case B: T is full (pile[T].size() == m) and count_color_in_pile(T, c) < m:
+     // We must first free exactly one slot on T by moving its top to somewhere safe, in a way that guarantees net +1 c on T.
+     - Precondition: B must be empty before starting.
+     - If top_color(T) == c:
+       • Find an unfrozen pillar R ≠ T with top_color(R) != c. This R MUST exist due to the selection rule above; if not, skip this color c for now and process another color.
+       • swap_top(T, R) using B (B must be empty). Now top(T) != c.
+     - Now with top(T) != c and B empty, pick a source S ≠ T, unfrozen, that contains c (prefer minimal nearest_depth_from_top).
+     - Perform the full extraction macro (6 steps):
+       1) move_ball(S, B);                               // free one slot on S
+       2) move_ball(T, S);                               // free one slot on T by moving a non-c to S (S back to full m)
+       3) while (top_color(S) != c) move_ball(S, B);     // peel S into B until c on top; B size ≤ m (guaranteed because T.top != c)
+       4) move_ball(S, T);                               // put c into T using T’s free slot
+       5) while (!pile[B].empty()) move_ball(B, S);      // restore S fully
+       6) B is empty at end
+     - This strictly increases the count of c on T by +1 and respects capacities.
+
+3) When T accumulates exactly m balls of color c, mark frozen[T] = true and color_done[c] = true; never move from it again.
+
+Important safeguards and pitfalls:
+- Never attempt naive interleaving like S->B; T->S; B->S without respecting the buffer invariant; always end macros with B empty.
+- Case A must be used when T has space; do NOT try to move from T if it is empty — that would violate preconditions. Case A handles T empty safely.
+- In Case B (T full), ensure T.top != c before moving from T; otherwise you make no net progress on the count of c at T.
+- Always avoid using frozen pillars as S or R.
+- The buffer B must be empty before starting any swap_top or extraction macro.
+- Maintain and check the global move count limit ≤ 10^7 in move_ball; the solution must not exceed it.
+
+Global driver (robust against the earlier failure modes):
+- Maintain a loop over remaining colors. At each iteration, among colors not yet done, consider only those colors c for which there exists at least one unfrozen pillar whose top != c (per the CRUCIAL SELECTION RULE). For each such c, compute the best target T (max count of c on an unfrozen pillar). Choose the best (c, T) (e.g., by maximizing count; tie-break arbitrary).
+- If no color satisfies the selection rule (i.e., all unfrozen tops show the same color c*), then among unfrozen pillars, either:
+  • There is exactly one unfrozen pillar left: it must already be pure (the last color); mark it frozen and done; or
+  • Otherwise, skip processing c* now and continue after other colors progress (this situation will not persist indefinitely because only one color can dominate all tops at once; once you finish some other color, the dominance breaks).
+- For the chosen (c, T), run the per-color phase until color c is done (count[T]==m), then freeze T and mark color_done[c]=true. Repeat until all colors are done.
+- To avoid infinite loops, ensure that every attempt that does not finish a color still performs at least one move (assert progress) and that the candidate selection will eventually find another color if stuck.
+
+Verification after construction:
+- Simulate/validate that no pillar size ever exceeds m at any time (you can verify on the same in-memory structure you maintained).
+- In the final state, for each color c in 1..n, all m balls of color c are on exactly one pillar, and that pillar contains only color c (any pillar index is allowed). Exactly one pillar will end up empty.
+- Move indices are valid and consistent with the rules.
+- Ensure buffer B is empty at the end (typical for this construction).
+
+Coding details to respect:
+- Wrap the entire solution in a single ```cpp fenced block. No explanations outside the block.
+- Use assert checks in move_ball and during verification to ensure correctness; they must not fail on correct logic.
+- Use long long for move count if you compute or compare with 1e7, but storing moves as vector<pair<int,int>> is fine (memory for up to 1e7 moves is large; typical test limits ensure feasible memory).
+- Use fast I/O settings and avoid extra overhead or debug prints.
+
+The final program must:
+- Read input exactly,
+- Generate a valid sequence within ≤ 10^7 moves following the macros above (with the selection rule that skips colors dominating all unfrozen tops),
+- Print exactly k followed by k moves,
+- Perform internal runtime checks and a final verification as described.

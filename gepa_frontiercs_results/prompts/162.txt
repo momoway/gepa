@@ -1,0 +1,87 @@
+You are a competitive programmer. Implement a C++17 solution for the AtCoder Heuristic Contest 021 “Pyramid” problem with strict adherence to input/output specifications, constraints, and validity requirements. Your response must ONLY contain the C++ code wrapped in a single ```cpp ... ``` block. Do not include any explanations, comments, or extra text outside the code block.
+
+Task summary and I/O format (important to match exactly):
+- Fixed N = 30 tiers, triangular grid with coordinates (x, y) where 0 ≤ x ≤ 29 and 0 ≤ y ≤ x.
+- The input consists of 30 lines:
+  b_{0,0}
+  b_{1,0} b_{1,1}
+  ...
+  b_{29,0} ... b_{29,29}
+  Each b_{x,y} is an integer in [0, 464], and all 465 numbers are distinct.
+- Output:
+  - First line: integer K (0 ≤ K ≤ 10000), the number of swap operations.
+  - Next K lines: each line: x1 y1 x2 y2 (0-based), representing a swap between two adjacent balls.
+- No extra prints, blank lines, spaces, or debug output. Print exactly K lines after the first line.
+
+Adjacency (must be strictly enforced):
+Two positions (x1, y1) and (x2, y2) are adjacent in 6 directions iff exactly one of the following holds:
+- x1 = x2 - 1 and y1 = y2 - 1
+- x1 = x2 - 1 and y1 = y2
+- x1 = x2 and y1 = y2 - 1
+- x1 = x2 and y1 = y2 + 1
+- x1 = x2 + 1 and y1 = y2
+- x1 = x2 + 1 and y1 = y2 + 1
+
+Goal condition:
+- After performing at most 10000 adjacent swaps, arrange so that for every (x, y) with x ≤ 28 and 0 ≤ y ≤ x:
+  a[x][y] < a[x+1][y] and a[x][y] < a[x+1][y+1].
+- If you cannot achieve E=0 (no violations) within 10000 swaps, it is still valid; the score will degrade but output must remain legal. Any illegal move, out-of-bounds coordinate, or K > 10000 yields Wrong Answer regardless of score.
+
+Scoring (for context; validity is paramount):
+- Let E be the number of violated parent-child pairs after your K swaps.
+- If E = 0: score = 100000 - 5K.
+- If E > 0: score = 50000 - 50E.
+
+General implementation requirements:
+- Use 0-based indexing for I/O.
+- Do not assume multiple test cases; read exactly 465 integers (triangular form) and solve once.
+- Use deterministic behavior (no randomness or seeded RNG), and stop adding moves immediately when K reaches 10000.
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Ensure memory/time efficiency (N is small, but avoid unnecessary overhead).
+- Always produce a valid output; if input read fails, print K=0.
+
+Robustness and validity safeguards (to avoid WA):
+- Maintain the triangular grid a[x][y] in a vector of N rows where row x has x+1 elements.
+- Track and enforce K ≤ 10000 at all times; never record or print more than 10000 moves.
+- Before recording a swap, verify that:
+  - Both coordinates are within bounds: 0 ≤ x ≤ 29 and 0 ≤ y ≤ x.
+  - The two coordinates are adjacent per the 6-direction rules above.
+- Record moves only after performing the swap on the grid state.
+- At the end, print exactly moves.size() lines after the first line containing K = moves.size().
+
+Recommended safe baseline algorithm (heapify-like, converges quickly and guaranteed adjacency):
+- Repeat until no swaps occur in a full pass or K reaches 10000:
+  - For x from N-2 down to 0:
+    - For y from 0 to x:
+      - While K < 10000:
+        - Let left child L = a[x+1][y] and right child R = a[x+1][y+1].
+        - If a[x][y] ≤ min(L, R), break (this (x, y) is fine).
+        - Otherwise, choose the smaller child:
+          - If L < R: swap positions (x, y) and (x+1, y).
+          - Else: swap positions (x, y) and (x+1, y+1).
+        - Record this as an adjacent swap; update the grid values.
+        - Continue the while-loop to sink this element further if needed (still within bounds and K limit).
+- This “sink” loop per node reduces the number of global passes and respects adjacency by swapping only with direct children.
+
+Additional defensive details:
+- Implement a small inline function to check adjacency strictly per the 6 rules before recording.
+- Ensure indices are always within their valid triangular bounds after each swap.
+- If K hits 10000 during processing, stop immediately and output the moves collected so far.
+
+Output precision:
+- Print K on the first line.
+- Then print exactly K lines of moves with 0-based indices.
+- No trailing spaces or extra newlines beyond what’s required.
+
+Edge cases and fallbacks:
+- If the input stream fails before reading all values, output “0” and terminate.
+- If at any point internal consistency is compromised (should not happen with careful coding), prefer to stop early and output a valid (possibly short) sequence.
+
+Remember:
+- Validity is more important than score. Any non-adjacent swap, OOB coordinate, mismatched K vs lines printed, or K > 10000 leads to WA.
+- Do not include any explanation or logging in the output. Only the required format.
+
+Implement in a single C++17 file and wrap it in one code block:
+```cpp
+// your code
+```

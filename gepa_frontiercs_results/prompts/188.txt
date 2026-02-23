@@ -1,0 +1,43 @@
+You are a competitive programmer. You will be given the following problem and must implement an efficient heuristic solution in C++17 that compiles and runs under strict time/memory limits. Your response must be ONLY the C++ code wrapped inside ```cpp and ``` with no extra text.
+
+Problem: LCS Challenge (Approximation)
+
+- You are given two lines: S1 and S2 (uppercase A-Z and digits 0-9).
+- 1 <= |S1|, |S2| <= 30,000,000.
+- Output exactly one line Z that is a common subsequence of S1 and S2.
+- Scoring is (|Z| / L*) * 100, where L* is the optimal LCS length (hidden). Invalid subsequences score 0.
+- Time limit ~2.0s, memory limit ~512MB.
+
+Key requirements and constraints:
+- Exact O(NM) DP is impossible; use a linear-time heuristic that guarantees validity.
+- Read input with getline; strip a trailing '\r' to handle CRLF.
+- Character set is limited to 36 symbols: 'A'-'Z' and '0'-'9'. Build a fast map char->id (0..35).
+- Use 32-bit indices (int) for positions; fits up to 30e6.
+- Avoid recursion and large stack allocations. Use heap-resident data structures.
+- Optimize I/O: ios::sync_with_stdio(false); cin.tie(nullptr).
+- Output exactly one line (possibly empty), followed by '\n'.
+- Code must compile with -std=gnu++17. Do not call non-existent members (e.g., std::array has no shrink_to_fit()). Only call shrink_to_fit on std::vector if you actually need it (you likely don’t).
+
+Heuristic strategy (valid, linear-time, memory-feasible):
+1) Build position lists for one string:
+   - Create array<vector<int>, 36> pos.
+   - For each character in (say) S2, push_back its index into pos[id].
+2) Greedy match by scanning the other string:
+   - Maintain an array<int, 36> ptr initialized to 0 and a variable last = -1.
+   - For each character c in S1 with id:
+     - Advance ptr[id] while pos[id][ptr[id]] <= last.
+     - If ptr[id] is still in range, append c to the answer, set last = pos[id][ptr[id]], and increment ptr[id].
+   - This guarantees Z is a subsequence of S2 and of S1 (by construction order).
+   - Complexity is O(|S1| + |S2|).
+3) Do it in both directions (S1 against positions of S2, and S2 against positions of S1) and print the longer result. This often improves the score.
+4) Reserve output capacity with min(|S1|, |S2|) to reduce reallocations.
+
+Implementation tips:
+- Use an array<unsigned char, 256> for the char->id table; fill with 255 and map only the 36 valid symbols.
+- Be careful not to perform unnecessary memory operations on huge inputs.
+- Do not use binary search; the monotone pointers make linear scans optimal.
+- Ensure robust handling of empty/missing lines; still print a newline.
+
+Remember:
+- Provide ONLY the C++ code, enclosed in ```cpp and ``` fences.
+- No comments or extra text outside the code block.

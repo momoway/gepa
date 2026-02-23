@@ -1,0 +1,94 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. The problem will state the execution time and memory limits—design your algorithm and implementation to respect them. Your response must ONLY contain valid C++ code, wrapped inside a single code block using ```cpp and ``` with no additional text or explanation.
+
+Task: Graph 3-Coloring with score based on the number of conflicting edges. You must print a single line with n integers in {1,2,3}, one per vertex, representing a coloring that minimizes the number of conflicting edges (edges whose endpoints have the same color). Although the judge may award partial credit (score = 1 − b/m), it may still mark solutions as Wrong Answer unless they are perfect—so aim to achieve zero conflicts whenever possible and otherwise minimize conflicts aggressively.
+
+Input format and constraints:
+- n vertices, m edges, undirected, simple graph.
+- 1 ≤ n ≤ 1000, 0 ≤ m ≤ n(n−1)/2.
+- Input:
+  - First line: integers n and m (1-based in input).
+  - Next m lines: u v (1-based, u ≠ v).
+- No multiple edges or self-loops (but robustly handle duplicates if any).
+- Output: exactly one line with n integers c1 c2 … cn in {1,2,3}.
+- The graph may be disconnected.
+
+Scoring:
+- Let b be the number of conflicting edges. If m > 0, score = 1 − b/m. If m = 0, score = 1.
+- The judge may still mark the result “Wrong Answer” if not perfect. Therefore, minimize b; try hard to reach b = 0.
+
+Implementation requirements:
+- Fast I/O. Print exactly one line with n integers (in 1..3), space-separated, then a newline. No extra output.
+- Use 0-based indices internally; convert to 1-based colors at the end (+1).
+- Build adjacency lists: vector<vector<int>> adj(n). Also keep a flat vector<pair<int,int>> edges for evaluating b quickly.
+- Maintain O(n + m) memory structures. n ≤ 1000 allows small extras (e.g., per-vertex arrays of size 3).
+- Time budget:
+  - If a time limit T seconds is stated in the problem, use ~0.9*T for search.
+  - If no explicit time limit can be parsed, assume ~0.95 seconds.
+  - Use std::chrono::steady_clock; check time periodically (e.g., every 512–1024 iterations) to avoid TLE.
+- Randomization:
+  - Use mt19937 with a good seed derived from chrono steady_clock now combined with std::random_device if available. Do NOT use undefined behavior tricks for seeding.
+  - Make the algorithm robust to randomness: multiple restarts within the time budget; keep the best solution found across restarts.
+
+Algorithmic strategy (effective for n up to 1000):
+1) Initialization:
+   - Degree-aware greedy (DSATUR-style or largest-degree-first):
+     - Order vertices by descending degree (break ties randomly).
+     - For each vertex v, compute neighbor color counts among already-colored neighbors and choose a color in {0,1,2} minimizing same-colored neighbors (tie-break by smaller same-color count, then smaller color index, then random).
+   - Additionally, run a few randomized greedy initializations across restarts for diversification.
+   - Optional but useful: detect bipartite components via BFS and 2-color them using two of the three colors to guarantee zero conflicts in those parts; third color reserved for non-bipartite zones.
+
+2) Core data structures for local search:
+   - col[v] in {0,1,2}.
+   - nbCol[v][3]: number of neighbors of v currently colored 0,1,2 (kept in sync incrementally).
+   - cntSame[v] = nbCol[v][col[v]].
+   - Maintain a dynamic list of conflicting vertices (cntSame[v] > 0) with O(1) add/remove using an index map (vector<int> conf, vector<int> where).
+   - Track total conflicts b (e.g., b = sum(cntSame[v]) / 2) and keep it incrementally updated on every move.
+
+3) Local improvement (min-conflicts with enhancements):
+   - While within time and b > 0:
+     - Sample K vertices (e.g., K in [6..10]) from the conflicting list conf and pick the one with the largest cntSame (break ties randomly).
+     - For that vertex v, use nbCol[v] to compute the delta for moving v to each color c ∈ {0,1,2}, c ≠ col[v]:
+       - oldSame = nbCol[v][col[v]], newSame = nbCol[v][c], delta = newSame − oldSame.
+       - Choose the move with the most negative delta (best improvement). Break ties by smaller newSame, then smaller color index, then random.
+     - Apply the move only if it improves b; allow occasional sideways moves (delta == 0) with small probability (e.g., 1–3%) and occasional worse moves with very small probability (e.g., 0.2–0.5%) to escape plateaus.
+     - Update col[v], nbCol[u][*] for each neighbor u of v, cntSame[v], cntSame[u], the conflict list (add/remove affected vertices), and b incrementally in O(deg(v)).
+     - Maintain and update the global best (minimal b) and save its coloring.
+
+4) Kempe chain and pairwise color swaps (powerful plateau-escape move):
+   - Occasionally, when progress stalls for many iterations, pick two distinct colors a, b and a seed vertex in conf (or a high-conflict endpoint).
+   - Build the connected component (Kempe chain) of the subgraph induced by colors {a, b} using non-recursive BFS/DFS; collect chain vertices in a buffer.
+   - IMPORTANT: If you perform a Kempe swap (swap a↔b on the whole chain), you MUST update nbCol, cntSame, conf, and b consistently. The number of conflicts is NOT invariant under a Kempe swap because of edges between the chain and vertices colored with the third color or with the same color inside the chain.
+     - Safe approach: before applying the swap, compute the net delta in b by scanning all edges incident to chain vertices and comparing conflicts before vs after; or apply the swap tentatively and recompute nbCol, cntSame, and b for only affected vertices; or as a last resort, temporarily apply the swap and recompute b and all per-vertex counts from scratch (O(n + m)) but do this rarely due to cost.
+     - Accept the swap only if it reduces b (or with small probability if equal/worse to escape plateaus). Always keep data structures consistent if the swap is accepted; revert otherwise.
+   - If correct delta bookkeeping is complex, you may omit Kempe swaps entirely and rely on strong min-conflicts, tabu, and perturbations; correctness is more important than including a buggy swap.
+
+5) Tabu/annealing safeguards:
+   - Maintain a small tabu tenure per vertex: forbid recoloring v back to its immediate previous color for a few steps (e.g., 5–15) to reduce cycling.
+   - Optionally add simulated annealing acceptance: accept slightly worse moves with probability exp(−Δ/T) with T decreasing over time.
+
+6) Multi-start and perturbations:
+   - If stuck without improvement for many iterations:
+     - Light perturbation: randomly recolor a handful (e.g., 5–15) of high-conflict vertices to random different colors, applying the same incremental updates.
+     - Optionally perform a few random Kempe swaps if you implemented correct updates.
+   - Use multiple restarts within the time budget; start each restart from a new greedy/randomized initialization. Always keep the best solution found across all restarts and restore it before output.
+
+7) Special cases:
+   - If m == 0, output all 1s immediately (score 1) and exit.
+   - Disconnected graphs are handled naturally. Bipartite components can be 2-colored exactly (use two of the three colors) to avoid any conflicts there.
+   - Robustly handle inputs: if reading fails, exit cleanly without printing garbage.
+
+8) Output:
+   - Print exactly n integers in [1..3], space-separated, followed by a single newline.
+   - Convert internal 0/1/2 to 1/2/3 before printing.
+   - Do not print any extra spaces/lines or debug output.
+
+Performance and correctness considerations:
+- Keep all updates O(1) amortized per edge touched; maintain adjacency lists and per-vertex neighbor color counts.
+- Avoid O(n^2) memory. O(n + m) plus small per-vertex arrays is fine for n ≤ 1000.
+- Check time every few hundred iterations and stop the search gracefully within the budget.
+- Avoid recursion depth issues (use iterative BFS/DFS).
+- Avoid undefined behavior (e.g., do not manipulate raw pointers for RNG seeding). Use a clean seed: combine steady_clock::now().time_since_epoch().count() with random_device if available.
+- Keep internal state consistent at all times (col, nbCol, cntSame, conf, b). After any complex operation (e.g., Kempe swap), either carefully update structures incrementally or recompute them to maintain invariants.
+- Always track and output the globally best coloring found.
+
+Remember: output only the C++ code inside a single ```cpp ... ``` block, with no additional text.

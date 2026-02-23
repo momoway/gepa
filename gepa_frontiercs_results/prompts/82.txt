@@ -1,0 +1,109 @@
+You are a competitive programmer implementing an interactive solver in C++17. Your reply must contain ONLY the C++ code wrapped in ```cpp ... ``` with no extra text. Follow these requirements meticulously.
+
+Overall task (interactive):
+- There is a hidden permutation p of length n over {0, 1, ..., n−1}, with all values distinct.
+- Exactly one index z has p[z] = 0 (the unique zero).
+- You may query the interactor for (p[i] | p[j]) with i ≠ j (bitwise OR).
+- Limits: 3 ≤ n ≤ 2048, hard query limit = 4269 (final printing does NOT count).
+
+Key properties:
+- For the true zero index z and any t, ask(z, t) = p[t]. This is within [0, n−1] and is unique per t across all different t’s because p is a permutation.
+- For any non-zero x ≠ z and any t, ask(x, t) = p[x] | p[t] ≥ p[t], with equality iff p[x] is a submask of p[t].
+- Therefore, for any fixed t and any candidate set C that contains z, the minimal value min_{x∈C} ask(x, t) equals p[t], and z is guaranteed to be among the minimizers. Repeatedly filtering C by keeping only the minimizers for suitably chosen t’s will never eliminate z and, if the chosen t’s are discriminative enough, will eventually isolate z.
+
+I/O and implementation requirements:
+- Use 1-based indices everywhere.
+- First read n from stdin.
+- To query: print exactly "? i j" (with i, j in [1..n], i ≠ j), then flush, then read an integer reply.
+- If the reply is −1 or EOF, terminate immediately (return/exit).
+- When ready to output: print exactly "! p1 p2 ... pn" and flush.
+- Fast IO: ios::sync_with_stdio(false); cin.tie(nullptr).
+- Seed RNG deterministically: e.g., mt19937 rng(712367).
+
+Query accounting and memoization:
+- Maintain a global counter usedQueries of actual queries sent. Only increment when you print a query and read a fresh response. Do NOT increment on memo hits.
+- Implement ask(i, j) with:
+  - Assertion i != j.
+  - Canonicalize the pair as (min(i, j), max(i, j)) since OR is symmetric, for memoization.
+  - Use unordered_map<long long, int> for memo; serialize pair as ((long long)min << 21) | max (21 bits suffice for n ≤ 2048).
+  - If not memoized, print the query, flush, read the reply. If reply is −1 or EOF, terminate immediately. Store in memo and increment usedQueries.
+
+Absolute budget discipline:
+- Hard limit is 4269 total queries (final print excluded).
+- Before any non-essential probing, compute Remaining = LIMIT − usedQueries.
+- Always reserve (n − 1) queries for the final reconstruction, plus a safety margin (e.g., 8).
+- Let budgetExtra = max(0, Remaining − (n − 1) − 8).
+- Never start any loop whose worst-case total added queries could exceed budgetExtra. Always bound the number of (x, t) probes by this budget.
+
+Robust strategy (fixes included to avoid prior wrong-answer pitfalls):
+1) Read n. Let B = ceil(log2(max(1, n))).
+
+2) Phase A — single full pivot pass (n−1 queries):
+   - Choose a random pivot s in [1..n].
+   - For each i ≠ s, compute r[i] = ask(s, i). Track m = min r[i].
+   - Define:
+     - Smin = { i ≠ s | r[i] == m } (minimizers against the pivot).
+     - G = { i ≠ s | r[i] > m } (non-minimizers).
+   - Build initial candidate set Alive:
+     - Always include all indices in Smin.
+     - Also include s itself (critical to preserve the case s == z; note Smin can be empty in that case when interpreted via submask logic).
+   - Keep a stable snapshot Alive0 = Alive after Phase A (store it; used in verification without extra queries).
+
+   Rationale:
+   - If s ≠ z, then r[z] = p[s], which equals the minimum m, so z ∈ Smin ⊆ Alive.
+   - If s = z, then r[i] = p[i], and m equals the minimal non-zero value (typically 1); Smin will not contain s; explicitly including s ensures z is retained.
+
+3) Phase B — progressive filtering using discriminative test points (bounded by budgetExtra):
+   - Goal: shrink Alive to a single index (ideally the zero) using the invariant “keep only minimizers of ask(x, t) over x ∈ Alive” for selected t’s.
+   - Build an ordered pool P of candidate test indices t (distinct from each other, but they may belong to Alive; if t ∈ Alive, you MUST skip the pair x == t when querying).
+     - High-impact, deterministic choices first:
+       - Append up to K1 = min(B + 4, (int)Smin.size()) indices from Smin (these eliminate s quickly if s ≠ z; this was missing before and is essential).
+       - Then append up to K2 = min(B + 4, (int)G.size()) indices from G with the smallest r[i] (they tend to have fewer 1-bits).
+     - If more are needed and budget allows, append additional distinct indices from [1..n] \ {s} not already in P (prefer those not in Alive to avoid i == j), up to K3 = B + 4 more.
+     - Total target |P| ≈ up to 3B + 12, but you must cap the actually used prefix by budget: while projectedCost = sum over next t of (#Alive current minus 1 if t∈Alive else #Alive) would exceed budgetExtra, reduce how many t you will use.
+   - Progressive filtering:
+     - For each t in the selected prefix of P (in order), do:
+       - For each x in Alive, if x == t skip; else query val[x] = ask(x, t) unless memoized.
+       - Let best = min_x val[x] over x ∈ Alive, x ≠ t.
+       - Filter Alive = { x in Alive | x ≠ t and val[x] == best } plus (optionally) keep t if it was skipped; note: if t ∈ Alive, compare only over the others; z is never eliminated by this rule.
+       - Early-stop if |Alive| == 1.
+       - After each t, recompute Remaining and update budgetExtra; if continuing would break the reserve for reconstruction, stop filtering.
+
+   Notes:
+   - Allowing t from Smin (even when t ∈ Alive) is critical: If s ≠ z, any t in Smin strictly prefers z over s and quickly removes s from Alive. If s = z, Smin is made of very small values and applying t ∈ Smin reduces Alive to {s} immediately. This directly fixes a source of previous WAs where s erroneously survived.
+   - You may and should reuse memoized answers across filtering steps; do not recount memo hits as queries.
+
+4) Phase C — strong verification of the zero candidate before reconstruction (no extra new criterion beyond minimizer-consistency on all used t’s):
+   - If |Alive| == 1, take c0 = that single element and proceed; otherwise, select c0 as the smallest index in Alive (deterministic).
+   - Robust consistency check (no or minimal extra queries):
+     - Let V = the exact set of all t you actually used in Phase B (the used prefix of P). Also include s if budget allows and if not already in V (use r[•] values).
+     - For each t in V:
+       - Using memoized values from filtering (and from r[•] for t == s), check that ask(c0, t) equals the minimum over x ∈ Alive0 of ask(x, t).
+         - If for some t this is violated (i.e., there exists x with strictly smaller ask(x, t) than ask(c0, t)), then c0 cannot be z. In that case, replace c0 with the next smallest index in Alive that still satisfies the minimizer condition for all t ∈ V. If none remains, keep the smallest from Alive and continue (budget-aware).
+     - Additionally (optional but useful if budget allows), test a few extra random distinct indices not in V and not equal to c0, ensuring that c0 is still a minimizer over current Alive for each such t. Always respect budgetExtra; do not touch the reconstruction reserve.
+   - DO NOT rely solely on “range < n and no duplicates” checks; they are too weak and caused WAs before. The decisive criterion is: c0 must be a minimizer for every t used in filtering. This is checkable without new queries if you reused memoized asks.
+
+5) Phase D — reconstruction (exactly n−1 queries):
+   - Let z = c0.
+   - For each i ≠ z, compute p[i] = ask(i, z). Set p[z] = 0.
+   - Do NOT make any further queries after this.
+   - Optionally, locally verify that all p[i] lie in [0, n−1] and are pairwise distinct (sanity only; do not issue more queries even if it fails).
+
+6) Output:
+   - Print exactly: "! p1 p2 ... pn" and flush.
+   - No extra text before or after.
+
+Critical cautions to avoid WA/TLE seen before:
+- Never randomly sample a strict subset of Smin for evaluation without including them in filtering. Progressive filtering must be applied so that the true z is never eliminated. Random subsampling can miss decisive t’s.
+- Unlike the earlier buggy approach, DO include several t from Smin (even if they are in Alive) and skip only the x == t comparisons; these t’s are most effective at eliminating s when s ≠ z, and they also confirm s when s == z. This was a major source of earlier wrong answers.
+- Strengthen pre-reconstruction verification: beyond range/duplicate checks, verify minimizer-consistency of the chosen candidate c0 using all t’s already used during filtering (no extra queries needed if memoized). If c0 ever fails to be a minimizer for some used t, it is not z.
+- Always strictly enforce the global budget: compute budgetExtra as LIMIT − usedQueries − (n − 1) − safety, and ensure the planned number of (x, t) probes in Phase B never exceeds it. Adjust the number of t’s accordingly.
+- Never perform a second full pivot pass; one full pass + small, targeted filtering + minimizer-consistency verification + reconstruction fits within 4269 for all n ≤ 2048.
+- Terminate immediately if the interactor responds −1 at any time.
+
+Implementation details:
+- Use 1-based indices and never call ask(i, i).
+- Memoize queries using the canonicalized unordered pair; do not count memo hits as queries.
+- Store and reuse all ask(x, t) values computed during filtering for every x in the Alive sequence and every t used. This is essential for the strong, zero-cost minimizer-consistency verification in Phase C.
+- Use long long where sums/costs are stored to avoid overflow in budgeting arithmetic.
+- Deterministic RNG seed (e.g., 712367) for reproducibility.

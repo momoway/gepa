@@ -1,0 +1,105 @@
+You are a competitive programmer. Implement a high-accuracy and numerically robust C++ solution that computes the area of the union of stroked segments (capsules). Print only the C++ code wrapped in ```cpp ... ``` with no extra text.
+
+Task recap and input format
+- There are n points in the plane (|x_i|, |y_i| <= 100).
+- Among all pairwise connections, m segments are marked “important”.
+- A brush of radius r (0 < r <= 5) is moved along each selected segment; the drawn shape of a single segment is a capsule (rectangle of width 2r around the segment + semicircular caps at the endpoints).
+- Compute the area of the union of all these capsules (overlaps counted once).
+- Input:
+  - First line: integer n (n <= 2410)
+  - Next n lines: two real numbers x_i y_i
+  - Next line: integer m (m <= n*(n-1)/2)
+  - Next m lines: two integers a b (1-based indices of endpoints)
+  - Next line: real number r (0 < r <= 5.0)
+  - Next line: four real numbers p1 p2 p3 p4; read all; do not use p2 and p4; do not print scoring; only print the area.
+- Output: one line with the total union area; use fixed formatting with sufficient precision (>= 9–12 decimals).
+
+Important constraints and expectations
+- The naive sum of individual capsule areas is wrong due to overlaps; compute the union area.
+- n up to 2410; practical m up to several thousands; solution should run under ~20s and 1 GB.
+- High numeric accuracy is required: target absolute error well below 1e-9 on typical instances. Prior solutions with too-loose integration tolerances failed by ~1e-9 to 5e-9. Tighten tolerances and ensure robust evaluation.
+
+Recommended algorithm: vertical sweep + adaptive integration
+- Compute area as Area = ∫ L(x) dx, where L(x) is the union length of y-intervals at vertical line x = constant across all capsules.
+- For each segment s = (P(x1,y1), Q(x2,y2)), precompute:
+  - v = Q - P: vx, vy; len2 = vx^2 + vy^2; len = sqrt(len2)
+  - Axis-aligned x-activity for its capsule: [left, right] = [min(x1,x2) - r, max(x1,x2) + r]
+  - Mark degenerate if len2 ~ 0: treat as a disk of radius r centered at P.
+- Deduplicate edges: treat (a,b) same as (b,a); skip a=b.
+
+Sweeping structure
+- Build events: for each nondegenerate segment s, emit (left, +1, id) and (right, -1, id).
+- Sort events by x; when x equal, process removes (-1) before adds (+1) to enforce half-open activity [left, right).
+- Sweep through consecutive distinct event x’s; maintain an active set of segment ids with O(1) add/remove (e.g., vector + position map).
+- For each slab [xi, xi+1]:
+  - The active set is constant over the open interval (xi, xi+1); integrate L(x) over [xi, xi+1] using an adaptive Simpson’s rule with a tight absolute tolerance proportional to slab width (see below).
+  - Evaluate f(x) = L(x) using only the active segments.
+
+Computing a single segment’s vertical intersection at x = X
+- Degenerate segment (len2 ≈ 0): contributes the disk centered at P:
+  - If |X - x1| <= r: dy = sqrt(max(0, r^2 - (X - x1)^2)); interval [y1 - dy, y1 + dy]
+- General capsule is the union of:
+  1) Central strip (rectangle around the segment, clipped to interior projection t ∈ [0,1]):
+     - If |vx| < epsV (vertical segment):
+       - Condition: |X - x1| <= r; if true, interval [min(y1,y2), max(y1,y2)]
+     - Else (non-vertical):
+       - y0 = y1 + (vy/vx) * (X - x1)        // line’s y at x = X
+       - half = r * len / |vx|               // vertical half-width from distance-to-line ≤ r
+       - Base strip interval A = [y0 - half, y0 + half]
+       - Enforce t ∈ [0,1]. With t(y) = (vx*(X - x1) + vy*(y - y1)) / len2:
+         - If |vy| < epsH (horizontal segment): t depends only on X:
+           - t = vx*(X - x1)/len2; strip contributes A iff 0 <= t <= 1
+         - Else:
+           - Solve t=0 and t=1 for y:
+             - ya = y1 - (vx*(X - x1))/vy
+             - yb = y1 + (len2 - vx*(X - x1))/vy
+             - Let B = [min(ya,yb), max(ya,yb)]
+           - Central contribution is A ∩ B
+  2) Endpoint disks (two semicircular caps):
+     - For C in {P, Q}: if |X - xc| <= r:
+       - dy = sqrt(max(0, r^2 - (X - xc)^2)); interval [yc - dy, yc + dy]
+- At x = X, collect up to three intervals for this segment (central strip + two endpoint disks). Clamp small negative sqrt arguments to zero.
+
+Union length L(x)
+- From all active segments, collect all intervals at x = X.
+- Sort intervals by left endpoint; greedily merge overlapping or touching intervals using a small epsilon to avoid micro-gaps due to floating error.
+- Sum merged lengths to get L(x).
+- Performance: reuse a scratch vector for intervals to avoid per-call allocations; reserve ~3 * active_count capacity.
+
+Integration (adaptive Simpson, robust)
+- S(a,b) = (f(a) + 4 f(m) + f(b)) * (b - a) / 6, m = (a+b)/2
+- Recursively refine until |S_left + S_right - S| <= 15 * eps, and return S_left + S_right + (S_left + S_right - S)/15
+- Use an absolute tolerance per slab: epsSlab = max(1e-12, 1e-11 * (b - a)).
+- Cap recursion depth generously (e.g., 30). If max depth reached, return current sum (Sl + Sr) without Richardson correction.
+- Important: compute f(x) deterministically; numerical stability at endpoints is good since f is sampled at a, m, b; integration slabs are [event_i, event_{i+1}] with events sorted and removes processed before adds, so activity is well-defined (half-open [left, right)).
+
+Numeric robustness
+- Use long double for all geometric and integrand computations (coordinates, dot/cross-like expressions, sqrt, interval endpoints, sums), then cast final area to double for printing.
+- Epsilon values:
+  - epsV for vertical detection: ~1e-12
+  - epsH for horizontal detection: ~1e-12
+  - EPS_MERGE for merging intervals: ~1e-12 (or slightly larger like 1e-11)
+  - EPS_XSAME for event x tie-breaking: ~1e-12
+- Clamp sqrt argument: if val < 0 but val > -1e-15, set to 0.
+- Skip segments quickly in f(x) if X is outside [left - tiny, right + tiny].
+
+Complexity and performance tips
+- Deduplicate edges with a hash of ordered pair (min(a,b), max(a,b)).
+- Precompute per-segment quantities (vx, vy, len, len2, minx, maxx, left, right).
+- Maintain active set = vector<int> plus pos[] map for O(1) removal by swap-with-back.
+- Reserve typical capacities to avoid reallocations.
+- Avoid dynamic allocations inside tight loops (recycle buffers).
+- For m large, this approach remains efficient if active counts per slab are moderate; adaptive Simpson focuses evaluations where f(x) changes rapidly (near cap edges).
+
+Correctness checks
+- Single segment of length L must yield area 2*r*L + pi*r^2.
+- Degenerate segment (two identical points) equals a disk area pi*r^2.
+- Overlaps must be counted once.
+
+Implementation requirements
+- C++17 or later; fast I/O; -O2 friendly code.
+- Output only the area (no extra text), fixed with high precision (e.g., setprecision(12)).
+- Read all of p1, p2, p3, p4 but ignore p2 and p4. Do not output any scoring; only print the area.
+
+Deliverables
+- Print only the C++ code within ```cpp ... ```; no explanations or comments outside the code block.

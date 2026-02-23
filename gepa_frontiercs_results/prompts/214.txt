@@ -1,0 +1,84 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++ that respects the stated execution time and memory limits. Your response must ONLY contain the complete C++ source code wrapped in
+
+```cpp
+// code
+```
+
+with no additional explanation, comments, or text outside the code block.
+
+Task: Sequence Reversal (requese)
+- Given a permutation a[1..n], choose a single integer x once, then output a sequence of reversals to restore the sequence to 1..n using only segments of length exactly (x-1) or (x+1).
+- Input:
+  - Line 1: integer n (1 ≤ n ≤ 10^3)
+  - Line 2: n integers a[1..n], a is a permutation of 1..n
+- Output:
+  - Line 1: the chosen integer x
+  - Line 2: integer m, the number of operations
+  - Next m lines: two integers l r (1 ≤ l ≤ r ≤ n), each denoting a reversal operation on [l, r]
+- Constraints:
+  - Time limit: 2 seconds
+  - Memory limit: 512 MB
+- Scoring (special judge):
+  - As long as every operation is a valid reversal of length exactly x-1 or x+1 and the final array is sorted to 1..n, you receive points.
+  - If m ≤ 20n, full score. If m > 200n, score = 0. Otherwise linear interpolation between.
+
+Hard constraints and robustness requirements:
+- You must choose a single x and keep it consistent for all operations. Every reversal length must be exactly x-1 or x+1. No other lengths allowed.
+- Strictly follow the input and output formats. No extra prints or whitespace.
+- Use fast I/O and avoid unnecessary overhead.
+- Avoid undefined behavior: no out-of-bounds access, no invalid iterators, etc.
+- Keep arrays/vectors sized safely (e.g., size n+5 for 1-based indexing).
+- Implement all reversals through a single validated apply() function:
+  - Validate 1 ≤ l ≤ r ≤ n.
+  - Validate len = r - l + 1 is exactly x-1 or x+1 before performing the reversal.
+  - IMPORTANT: If you store a[1..n] in a vector of size n+1 (with a[0] unused), the correct way to reverse inclusive [l, r] is:
+    reverse(a.begin() + l, a.begin() + r + 1);
+    Do NOT use reverse(a.begin() + (l - 1), a.begin() + r) in this 1-based scheme; that is off by one and will corrupt the algorithm.
+  - After reversing, update pos[] for k in [l..r]: pos[a[k]] = k.
+  - Never call reverse() with iterators outside the vector’s valid range.
+- Ensure all indices used are within [1..n].
+- Keep m ≤ 200n.
+
+Algorithmic plan to stay within 200n operations and be safe:
+- Picking x:
+  - If n = 1: choose any x (e.g., 3), output 0 operations.
+  - If n = 2: choose x = 3 so allowed lengths are 2 and 4; use at most one reversal of length 2 if needed.
+  - If n ≤ 8: choose x = 3 and use only adjacent swaps (length 2) to bubble the array into place. For n ≤ 8 this stays well under 200n.
+  - For general n > 8: choose x = 7 so allowed lengths are 6 and 8. This pair is powerful and keeps operations linear.
+
+- For n > 8, constructive strategy that guarantees m ≤ 200n:
+  1) Maintain pos[v] = current index of value v.
+  2) Place elements 1..(n-8) from left to right:
+     - Let i be the target position/value. Let p = pos[i].
+     - While p - i ≥ 7, apply [p-7, p] (length 8) to move i left by 7 in one step; update p = pos[i].
+     - Now 0 ≤ d = p - i ≤ 6. Use only windows fully within [i .. i+7] (valid because i ≤ n-8 in this phase) to reduce d to 0 via a precomputed shortest sequence over the 8-position block using the following four operations:
+       - t=0: reverse [i, i+7] (length 8)
+       - t=1: reverse [i, i+5] (length 6)
+       - t=2: reverse [i+1, i+6] (length 6)
+       - t=3: reverse [i+2, i+7] (length 6)
+       Model the single tracked index offset p-i in {0..7} and BFS over these 4 operations to find, for each d in 0..7, a shortest sequence of operations that moves offset d to 0. Because reversal is an involution, the same operation label works in both directions, and the sequence obtained by following parent links from d to 0 can be applied in that same order.
+  3) Resolve the last 8 elements (positions base = n-7 .. n):
+     - Perform a BFS over permutations of size 8 (40320 states) using exactly these moves on the 8-block:
+       - reverse [base, base+7] (length 8)
+       - reverse [base, base+5], [base+1, base+6], [base+2, base+7] (each length 6)
+     - Encode permutations via Lehmer code (factoradic) over values 0..7:
+       - codeOf: for i=0..7, count numbers < v[i] not yet used; res += cnt * fact[7-i]; mark v[i] as used.
+       - decode: given code, reconstruct permutation by selecting k-th unused element iteratively (use a small array for elems 0..7).
+     - BFS from the identity permutation, store parent and op used for each visited state. For the current last-8 configuration, fetch its code and reconstruct the sequence to identity via parent links, then map each step back to global [l, r] as above and apply.
+- Throughout:
+  - Always check 1 ≤ l ≤ r ≤ n and len ∈ {x-1, x+1} in apply().
+  - Reserve ops vector capacity: at least 200*n + 5 to avoid reallocations.
+  - Keep a hard cap: if ops.size() ever exceeds 200*n, abort further operations and ensure not to crash (though the given constructive plan should remain well within 200n).
+- Before printing:
+  - Verify the final array is exactly 1..n.
+  - Verify every recorded operation has valid bounds and length exactly x-1 or x+1.
+  - Print:
+    - First line: x
+    - Second line: m
+    - Next m lines: l r
+
+General coding standards:
+- Use std::vector and std::array safely; avoid raw pointers unless necessary.
+- Avoid recursion depth issues.
+- Use O(n) or O(n log n) constructs; the BFSes are on fixed small state spaces and are cheap.
+- No extra prints or debug output. Only the required output format.

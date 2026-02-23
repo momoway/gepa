@@ -1,0 +1,127 @@
+You are to implement a solver for the IOI-style “World Map” problem with strict safety against illegal adjacencies and with an I/O format compatible with the sample grader. Follow these instructions precisely. They include the full problem restatement, a robust and simple construction that globally avoids illegal adjacencies, crucial implementation details (including a bug that caused prior WAs), checks you must perform, and the exact I/O contract.
+
+Problem restatement
+- Input: T scenarios. Each scenario describes a simple, undirected graph G = (V, E) with:
+  - N vertices (countries) labeled 1..N, with 1 ≤ N ≤ 40.
+  - M distinct edges, given as unordered pairs (A[i], B[i]) with 1 ≤ A[i] < B[i] ≤ N, 0 ≤ M ≤ N·(N-1)/2.
+  - There exists at least one valid map (coloring) satisfying the constraints below.
+- Output for each scenario: A square grid K×K, K ≤ 240, with cell colors in [1..N], such that:
+  1) Every color 1..N appears at least once.
+  2) For each edge (u, v) in E, there is at least one pair of side-adjacent cells colored u and v (in any order).
+  3) For any pair of side-adjacent cells with different colors (x, y), the unordered pair {x, y} must be an edge in E. No non-edge adjacency may ever appear.
+
+Important domain facts and implications
+- Adjacency is 4-neighbor (shared side). Diagonals do not count.
+- A country’s region need not be connected; disconnected regions per color are allowed.
+- Valid maps exist by problem guarantee. For N > 1, a vertex with degree 0 cannot be placed without creating a non-edge adjacency somewhere, so in any valid scenario with N > 1 there are no isolated vertices; in practice, G must be connected to admit any valid grid. (If you detect N > 1 but G is disconnected or has isolated vertices, the row-only method below cannot work; the official inputs that admit a valid map satisfy the requirement.)
+- You do not need to minimize K; any valid K ≤ 240 is accepted. However, some test systems also score based on R = K/N; smaller is better, but correctness is mandatory.
+
+A SAFE, SIMPLE, AND CORRECT CONSTRUCTION (Row-constant “vertical-walk” method)
+We eliminate all horizontal cross-color adjacencies by making each row a single constant color. Then all cross-color adjacencies are vertical between consecutive rows, which we design to be exactly along edges of G. This guarantees condition (3).
+
+Plan outline:
+- Build a closed or open walk in G that includes every original edge at least once. The cleanest way is:
+  - Construct a multigraph H by “Eulerizing” G: pair all odd-degree vertices and duplicate edges along shortest paths between the paired vertices (edge multiplicities increase by 1 along those paths).
+  - Compute an Euler traversal (Hierholzer’s algorithm) on H to obtain a vertex sequence v0, v1, …, vL where each consecutive pair is an edge of G (counted with multiplicity). L equals the total edge multiplicity in H.
+- Render the grid as K × K with K = L + 1:
+  - For each row r in [0..K-1], fill the entire row with the single color v_r (converted to 1-based when printing).
+  - All horizontal adjacencies are same-color, thus safe.
+  - Every vertical seam between rows r and r+1 is the pair (v_r, v_{r+1}), which by construction is an original edge, hence safe and satisfies (2).
+  - All vertices that are incident to some edge appear in the Euler traversal (hence appear in the grid), satisfying (1). Handle N = 1 separately with a 1×1 grid [[1]].
+
+CRITICAL IMPLEMENTATION DETAILS AND PITFALLS
+1) Build graph structures:
+   - Convert input edges to 0-based internally.
+   - Build adjacency list adj[u] with simple edges.
+   - Track degrees deg[u].
+   - Build a fast lookup from unordered pair (min(u, v), max(u, v)) -> edge index id (0..M-1). Inputs have distinct pairs, so this mapping is unique.
+
+2) Eulerization (to make all degrees even with minimal extra edges):
+   - Let O be the list of odd-degree vertices in G. |O| is even.
+   - Compute BFS shortest-path parents for every source s ∈ O (unweighted graph) to enable shortest path reconstruction between any odd pair (s, t).
+   - Pair up odd vertices to minimize the sum of shortest path lengths:
+     - Preferred: Solve a minimum-weight perfect matching on the complete graph over O, with edge weight = BFS distance between the two odds (use Edmonds’ blossom algorithm; n ≤ 40 is fine).
+     - Acceptable alternative if implementing blossom is too complex: a greedy nearest-neighbor pairing using BFS distances. This often works and is fast, but produces longer walks; see K bound note below.
+   - For each selected odd pair (a, b), reconstruct one shortest path a→b using the BFS parents and increase the multiplicity of every original edge along that path by 1.
+
+   Important:
+   - Each duplication toggles the parity of the endpoints; interior vertices on the path see +2 degree and keep parity. After pairing all odds, all vertices in H must have even degree.
+   - Do NOT fabricate edges not in E; duplications only follow original edges.
+
+3) Build the Eulerian multigraph H:
+   - For each original edge i = (u, v), create ‘mult[i]’ parallel edges between u and v.
+   - Build per-vertex lists of incident multiedge IDs.
+   - totalE = sum(mult[i]) must fit memory; N ≤ 40 ensures it does.
+
+4) Hierholzer’s algorithm (must use ALL edges):
+   - Choose start:
+     - If H has odd-degree vertices (should not happen if step 2 is correct), choose an odd vertex as start; otherwise, choose any vertex with degree > 0.
+   - Run Hierholzer to get a sequence of vertices ‘seq’ of length totalE + 1. Standard stack-based implementation with per-vertex adjacency pointers works well.
+   - You MUST verify seq.size() == totalE + 1. If not, you did not traverse all edges (this was a root cause of a prior WA). In that case, fix pairing/Eulerization; do NOT proceed with a partial walk.
+   - Do not attempt to concatenate multiple disjoint tours by simply stacking them: the seam between tours would be a pair of different colors that may not be an edge, causing “non-edge adjacency” violations.
+
+5) K choice and bound:
+   - Set K = L + 1 = seq.size().
+   - K must be ≤ 240. NEVER “truncate” the walk to clamp K to 240. Truncating creates a valid-format but incorrect map that misses required edges, and will be judged Wrong Answer.
+   - If K > 240, you MUST switch to a different 2D packing that uses both horizontal and vertical safe seams and still never introduces a non-edge adjacency. This is more complex; see Fallback below.
+
+6) Grid construction (this avoids the prior seam bug completely):
+   - Create a K×K grid C.
+   - For r in [0..K-1], fill the entire row r with color (seq[r] + 1) to output 1-based colors.
+   - Do NOT segment the walk into chunks and stack 2-row or multi-row strips with varying bottom-row tiles; that approach creates vertical seams between segments where pairs (tileColor, nextStart) are not necessarily edges, causing “Edge not exist” failures. The row-constant method has only same-color horizontal adjacencies and exactly-the-walk vertical adjacencies, so it is globally safe.
+
+7) N = 1 special case:
+   - If N = 1, return a 1×1 grid [[1]].
+
+Fallback when K would exceed 240
+- The row-constant method yields K = number of traversed edges + 1 (counting duplications). With odd pairing chosen well (minimum-sum shortest paths), K is often ≤ 240 for sparse to moderate graphs. However, for denser graphs (e.g., near-complete), even the optimal Eulerization can still exceed 240.
+- In that case, you must implement a different 2D construction that:
+  - Uses both horizontal and vertical seams.
+  - Ensures every horizontal seam across any interval is either same-color or corresponds to a single allowed edge pair across that entire interval (so no column can create a non-edge).
+  - Ensures every vertical seam across any interval is either same-color or corresponds to a single allowed edge pair across that entire interval.
+- Designing a robust small-K tiling for arbitrary dense graphs is non-trivial and beyond this brief. If your judge includes such dense cases, invest the time to implement a careful 2D tiling that respects the above seam rules. Do NOT fall back to truncation.
+
+I/O format (exactly as the sample grader expects)
+- Read T scenarios.
+- For each scenario, read:
+  N M
+  A[0] B[0]
+  ...
+  A[M-1] B[M-1]
+- Output for each scenario:
+  Line 1: P  (number of rows, equals K)
+  Line 2: Q[0] Q[1] ... Q[P-1]  (each equals K)
+  Line 3: (a single blank line)
+  Lines 4..(P+3): the grid C with P lines, each line has K integers (1..N)
+- Repeat per scenario; no extra blank lines between scenarios other than the required blank line before the grid of each scenario.
+
+Coding requirements (C++ reference)
+- Implement:
+  std::vector<std::vector<int>> create_map(int N, int M, std::vector<int> A, std::vector<int> B)
+- Build the Eulerian multigraph per above, compute the vertex sequence ‘seq’ with Hierholzer, set K = seq.size(), then return a K×K grid with row r constant = seq[r] + 1.
+- Convert colors back to 1-based for output.
+- Efficiency: N ≤ 40, M ≤ 780. BFS from each odd vertex is fine. Edmonds’ blossom for |O| ≤ 40 is fast enough if implemented; a greedy pairing is acceptable on many sparse instances but might increase K (ensure K ≤ 240).
+- Validation checks before output (debug-only; remove or guard in production):
+  - If N > 1, assert there are no isolated vertices and G is connected; otherwise, the row-walk is not applicable.
+  - After Eulerization, assert all degrees in H are even and that ‘seq.size() == totalE + 1’.
+  - Do not clamp K; assert K ≤ 240 or take the explicit fallback path.
+
+Common pitfalls (and how to avoid them)
+- Do NOT truncate the Euler walk to force K ≤ 240. This produces a valid-format but incorrect grid that misses required edges -> Wrong Answer.
+- Do NOT stack separate “edge strips” or segments without making the seam same-color or a uniform allowed edge across all columns. The bottom row of a segment containing varying colors directly under a top row of a single different color creates many invalid vertical pairs -> Wrong Answer. The row-constant method entirely avoids this.
+- Do NOT introduce any adjacency to a “background” or “separator” color unless that unordered pair is in E for every seam it touches.
+- Ensure your Hierholzer traversal consumes all edges. A prior WA came from producing only a partial tour due to imperfect pairing or traversal; always verify seq length equals total edge multiplicity + 1.
+
+Summary of the preferred solution
+- If N = 1: output 1×1 [[1]].
+- Else:
+  - Build G; compute degrees.
+  - Pair odd-degree vertices along shortest paths (prefer minimum-weight perfect matching; greedy pairing is acceptable for many sparse cases).
+  - Build multigraph H with edge multiplicities.
+  - Run Hierholzer to obtain vertex sequence covering all edges (check length).
+  - Let K = L + 1; ensure K ≤ 240; return K×K grid with row r = seq[r] + 1 everywhere in that row.
+- If K would exceed 240, implement a more sophisticated 2D packing that maintains the invariant: every cross-color seam (horizontal or vertical) across its whole interval is a single allowed edge, or is same-color.
+
+Deliverables
+- Provide the create_map implementation and a main() that reads T and prints according to the exact I/O format (including the intentionally blank third line per scenario).
+- No extra commentary in output.

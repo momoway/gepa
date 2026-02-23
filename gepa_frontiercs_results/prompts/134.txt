@@ -1,0 +1,144 @@
+You are a competitive programmer. You will be given an interactive problem statement named “Guess Number”. Implement a single C++17 program that follows the protocol exactly, is efficient on n up to 1e18, and keeps the number of queries far below 10,000 (target O(log n), typically < 200). Your response must ONLY contain the C++ code wrapped in ```cpp ... ``` and no additional text.
+
+Problem and interactive protocol:
+- There is exactly one test case.
+- The first line of input contains a single integer n (1 ≤ n ≤ 10^18).
+- You must print queries, each as two integers “x y” (1 ≤ x, y ≤ n) on a single line, then flush stdout.
+- After each query, read a single integer r in {0,1,2,3}:
+  - 0: x = a and y = b (you found the answer). Immediately terminate the program.
+  - 1: x < a (update the lower bound of a to x+1).
+  - 2: y < b (update the lower bound of b to y+1).
+  - 3: x > a OR y > b (the pair (a,b) is NOT in the top-right rectangle [x..n] × [y..n]). Record this as a constraint to exclude that rectangle thereafter.
+- If multiple responses are true for a given query, the interactor may choose any of them (adversarially). Your algorithm must make guaranteed progress under worst-case choices.
+
+Global correctness and efficiency requirements:
+- n can be as large as 1e18, so use unsigned long long (ULL) for coordinates and __int128 for all area/count computations.
+- Design for O(log n) behavior by always shrinking the feasible set by a constant factor under any valid interactor choice. Never brute-force.
+- Never print anything except the queries "x y". Always flush after printing a query. Terminate immediately on r=0.
+- Do not livelock. Avoid querying the same (x,y) twice.
+- All updates after reading r must strictly follow the protocol (no “defensive” or approximate updates).
+
+Feasible set representation (adversarial-safe):
+- Maintain the feasible set S implicitly via:
+  - Lower bounds la for a and lb for b (both start at 1).
+  - A multiset C of “forbidden top-right” constraints from every response r=3 at (x,y), meaning S excludes [x..n] × [y..n].
+- Represent S compactly by a non-increasing function F(a) that gives the maximum allowed b for each a:
+  - F(a) = min over all (x,y) in C with x ≤ a of (y-1), clipped to [0..n].
+  - If no such constraint applies to a, then F(a) = n.
+  - For current lb, candidates for fixed a are b in [lb .. F(a)] if F(a) ≥ lb (width = F(a) - lb + 1), else none.
+  - Total candidates A = sum over a = la..n of max(0, F(a) - lb + 1).
+- Maintain F using compressed constraints:
+  - Sort constraints (x,y) by x ascending; for equal x keep the minimal y.
+  - Build a prefix-min over (y-1) across increasing x to enforce F non-increasing.
+  - Build disjoint, contiguous segments [start_i, end_i] on [la..n] with constant F_i (F_i = current prefix-min or n if no constraint yet). Ensure F_i is non-increasing and each segment lies within [la..n].
+
+Counting utilities (must use __int128 for all products/sums):
+- For each segment i with:
+  - length Li = end_i - start_i + 1 (ULL)
+  - cap F_i (ULL)
+  - width_i = max<ULL>(0, F_i >= lb ? (F_i - lb + 1) : 0)
+  - Area_i = (i128)Li * (i128)width_i
+- Total A = sum Area_i.
+- Precompute for the whole segment array on [la..n]:
+  - prefArea[i] = sum_{j≤i} Area_j (i128)
+  - Also store ends[] to binary search where a threshold s falls.
+- Tail-area for a ≥ s (used for r=1 split when choosing x):
+  - If s ≤ la → tail_area(s) = A; if s > n → 0.
+  - Otherwise, find the segment k with end_k ≥ s and start_k ≤ s.
+    - Partial area in k from a=s..end_k = (i128)(end_k - s + 1) * (i128)width_k.
+    - Suffix area after k = A - prefArea[k].
+    - tail_area(s) = partial + suffix.
+
+Top/bottom areas by b-thresholds (for r=2 and r=3 balancing):
+- Define for any threshold T (≥ lb):
+  - Global “b ≥ T” area G(T) over all a∈[la..n]:
+    - Because F_i is non-increasing, for each segment i: contribution is Li * max(0, F_i - T + 1).
+    - Precompute arrays for global segments:
+      - len[i] = Li
+      - cap[i] = F_i
+      - prefLenF1[i] = sum_{j≤i} len[j] * (cap[j] + 1)  (i128)
+      - prefLen[i] = sum_{j≤i} len[j]                    (i128)
+    - To compute G(T): binary-search last index last with cap[last] ≥ T.
+      Then G(T) = prefLenF1[last] - (i128)T * prefLen[last].
+    - Removed by r=2 with query y = T is Rem2(T) = A - G(T+1).
+- For a fixed x, define trimmed “top-right” area TR_x(T) = candidates in [max(la,x)..n] × [T..n]:
+  - Build a trimmed segment view starting at sA = max(la, x):
+    - If sA is inside segment k, include a first trimmed segment [sA..end_k] with the same cap F_k.
+    - Include subsequent segments as-is.
+    - For the trimmed array, build:
+      - tLen, tCap, tPrefLenF1, tPrefLen analogous to the global arrays.
+  - Then TR_x(T) is computed the same way as G(T) but using the trimmed arrays.
+  - Removed by r=3 at query (x, y=T) is Rem3_x(T) = TR_x(T) (we delete [x..n]×[T..n]).
+
+Query selection per iteration (must guarantee progress under adversarial responses):
+1) Rebuild segments from current la, lb and recorded constraints C:
+   - Clip to [la..n], drop empty segments, ensure contiguity and F_i non-increasing via prefix-min construction.
+   - Precompute A, and all prefix sums described above.
+   - A must be > 0 as long as the interactor is consistent. Do NOT “invent” updates if A becomes 0; instead, just query (la, lb) once and update by the returned r exactly. Do not apply any dummy/approximate updates.
+
+2) If A == 1:
+   - Derive the unique (a,b) exactly from segments, without enumeration:
+     - There exists a unique segment i with Li = 1 and width_i = 1. This implies F_i = lb.
+     - The unique candidate is (a, b) = (start_i, lb).
+   - Query (a, b) and terminate on r=0 (the only valid response). Do not guess arbitrarily.
+
+3) Otherwise choose x to balance r=1:
+   - Find the smallest s in [la..n+1] with tail_area(s) ≤ A/2. Set x = clamp(s-1, la, n).
+   - If la < n and x == n, change x to n-1 to keep r=1 feasible. Always ensure la ≤ x ≤ n and x ≥ la.
+
+4) Choose y to (near-)minimize worst-case remaining area between r=2 and r=3:
+   - Build the trimmed arrays for TR_x starting at sA = max(la, x).
+   - Define for any T in [lb..n]:
+     - remain_if_r2(T) = G(T+1)               (kept after r=2)
+     - remain_if_r3(T) = A - TR_x(T)          (kept after r=3)
+   - Binary search T in [lb..n] to minimize max(remain_if_r2(T), remain_if_r3(T)).
+     - One practical way: find the minimal T with TR_x(T) ≥ A - G(T+1) (i.e., Rem3 ≥ Rem2), then compare with T-1 to pick the better minimax.
+   - Let y be this T, then clamp y to [lb..n]. Prefer y < n when lb < n so that r=2 remains informative if chosen.
+
+5) Avoid querying the same (x,y) twice:
+   - Maintain a hash set of asked points (x,y) to avoid duplicates. If the chosen (x,y) was already asked, tweak y by ±1 within [lb..n]; if impossible, tweak x within [la..n] by ±1. Recompute/remain within bounds. Keep tweaks bounded (≤ 128 steps) to avoid long loops.
+
+6) Ask the query (x, y), flush, then read r and update state exactly:
+   - r=1: la = max(la, x+1)
+   - r=2: lb = max(lb, y+1)
+   - r=3: record constraint (x, y) into C
+   - r=0: terminate immediately
+   - Do not apply any other updates. Never let la or lb exceed n (clamp if adversary gives pathological but still valid answers). Never query with x < la or y < lb.
+
+7) Degenerate cases (one dimension “collapses”):
+   - If la == n: only a = n is possible. Rebuild segments; the only valid b is in [lb..F(n)]. Use binary search on b by choosing y to split remain_if_r2 and remain_if_r3 with x = n:
+     - Build trimmed helper at sA=n.
+     - Choose y by the same minimax rule in step 4 using G and TR_n.
+   - If lb == n: only b = n is possible. Use binary search on a by choosing x via tail-area halving as in step 3, and set y = n (or n-1 if necessary to keep r=3 informative), still applying the minimax selection if helpful.
+
+Implementation requirements and guardrails:
+- C++17. Use ios::sync_with_stdio(false); cin.tie(nullptr);
+- Types: ULL for all coordinates (n, la, lb, x, y, a, b). i128 (i.e., __int128) for all area calculations and any sum/product of lengths and widths.
+- After every query, print a single line “x y” and immediately flush: cout << x << ' ' << y << '\n'; cout.flush();
+- Never print anything except queries. No debug prints.
+- Never use undefined or approximate updates (e.g., no “defensive fallbacks” that change la/lb without reading r).
+- Ensure segments are built correctly:
+  - Compress constraints by x keeping minimal y per x.
+  - Apply prefix-min over (y-1) to enforce F non-increasing.
+  - Build contiguous segments over [la..n], clipping caps to [0..n].
+  - Width for a segment is max(0, F_i - lb + 1).
+- All binary searches must be monotone-correct and terminate.
+- Ensure TR_x(T) is computed only on the trimmed view starting at sA=max(la, x), and G(T) on the full view starting at la.
+- Always guarantee progress:
+  - r=1 branch: tail_area(x+1) ≤ A/2 by construction.
+  - r=2 vs r=3 branches: y is chosen to minimize max(remain_if_r2, remain_if_r3), so the worst-case remaining area is a constant-factor fraction of A (typically ≤ ~3A/4), keeping total queries O(log n).
+
+Common pitfalls to avoid (based on prior failures):
+- Do not apply any state change unless dictated by the exact r received. In particular, do NOT “guess” updates for A==0; if it happens, just query (la, lb) and update strictly by r.
+- Do not compute A==1 case incorrectly. Derive (a,b) from the unique segment where Li=1 and width_i=1 (hence F_i = lb) → (a,b)=(start_i, lb). Do not “fallback” to arbitrary guesses.
+- Do not let TR(x,y)=0 unless forced by bounds; otherwise interactor can answer r=3 repeatedly without shrinking S. The minimax rule for y avoids this.
+- Do not pick x==n when la<n (r=1 would be impossible). Keep x in [la..n-1] when la<n.
+- Ensure all __int128 computations are used for sums/products (areas, prefix sums), especially when n≈1e18 and number of segments grows.
+- Avoid asking the same (x,y) multiple times; always adjust to a new point if collision occurs.
+
+Final deliverable:
+- Provide a single C++17 source file that implements the above, printed inside a single code block:
+  ```cpp
+  // your code
+  ```
+- Do not include any extra commentary or text outside the C++ code block.

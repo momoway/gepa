@@ -1,0 +1,111 @@
+You are a competitive programmer. You will be given an INTERACTIVE problem. Implement a solution in C++ that strictly follows the interactive protocol, uses time and memory efficiently, and outputs ONLY the C++ code wrapped in ```cpp ... ``` with no extra text.
+
+Problem domain:
+- There are exactly two “defective” positions (chairmen) among 1000 candidates labeled 1..1000 (inclusive). They may coincide: a = b is allowed.
+- You are given R (max number of robots/queries you may send) and H (max number of waits/rounds), read from stdin as two integers R and H on the first line.
+
+Interactive protocol (must adhere exactly):
+- To send a robot: print a single line of the form
+  "? k p1 p2 ... pk"
+  where:
+  - k is the number of positions in the set the robot scouts,
+  - p1..pk are pairwise distinct integers in [1..1000].
+  - Use ONLY spaces to separate tokens; DO NOT print any commas.
+  - After printing any output line, you must flush immediately (cout.flush()).
+- To receive answers: print a single line "@" to wait one hour and receive results. Then read from stdin:
+  - an integer L, followed by exactly L integers (0/1), one for each robot sent since the last "@" (or since the beginning if no previous "@"), in the exact order you sent them.
+  - You may call "@" at most H times.
+- You may send at most R robots total across the whole interaction.
+- Once you have determined the two positions, print a single line:
+  "! a b"
+  and flush. No other output is allowed. The unordered pair {a,b} is accepted; a=b allowed.
+
+Constraints and default to handle:
+- Positions are 1-indexed: 1..1000.
+- H may be as small as 1. Your solution must work non-adaptively with a single "@" by default.
+- The L values after each "@" correspond exactly to the robots sent since the previous "@" (or since start), in the exact order sent.
+- Never exceed the number of sends (R) or waits (H).
+- Use residues 0..m-1 for modulo computations. Residue 0 corresponds to multiples of m in [1..1000].
+
+Robust non-adaptive strategy guaranteed to uniquely recover in worst case:
+Use residue class partitioning with pairwise coprime moduli (primes) and Chinese Remainder Theorem (CRT) to create a 2-separable design.
+
+Plan:
+1) Choose a small list of pairwise coprime moduli whose product is ≥ 1000 and whose sum ≤ R (each modulus m uses m robots: one test per residue 0..m-1). Good defaults that fit within typical R=75:
+   - Preferred minimal-sum set: [3, 5, 7, 11] (sum = 26 robots, product = 1155 ≥ 1000). This is better than [2,3,5,7,11] (sum 28) while still covering 1..1000.
+   - If R is smaller and 26 would exceed R, greedily add the smallest unused primes from [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31] until:
+     - the product of chosen moduli reaches ≥ 1000, and
+     - the sum of chosen moduli ≤ R.
+   - If you cannot reach product ≥ 1000 due to very small R, still proceed with the moduli you can afford; decoding will fall back to exhaustive verification over pairs.
+
+2) For each chosen modulus m and for each residue r in 0..m-1, send one robot whose set is:
+   S(m,r) = { i in [1..1000] | i % m == r }.
+   - Use C++’s % operator on positive integers, giving residues 0..m-1.
+   - Residue 0 means multiples of m (m, 2m, 3m, ... ≤ 1000).
+   - Ensure all pi in a single robot’s set are distinct (true by construction).
+   - Maintain strict send order: iterate moduli in your chosen order, and for each modulus m iterate residues r=0..m-1. Record the (m,r) for every robot in exact order to reconstruct and to verify later.
+
+3) After sending all robots (sum m ≤ R), print "@", flush, then read L followed by L bits (0/1).
+   - With H=1, L should equal the number of robots sent since the beginning. However, be robust:
+     - Let expected = total robots you sent.
+     - If L < expected, only use the first L of your planned sends (trim trailing incomplete modulus blocks to whole blocks when possible).
+     - If L > expected (unlikely), read all L but only use the first expected bits (corresponding to your planned sends).
+   - Partition the L bits into contiguous blocks per modulus in the exact same send order so you can associate, for each modulus m, which residues r returned 1.
+
+4) Interpretation per modulus m:
+   - Let Ones(m) be the set of residues r for which the response was 1, observed among r=0..m-1.
+   - For each modulus m we expect:
+     - |Ones(m)| = 1 if a % m == b % m (both chairmen in same residue class),
+     - |Ones(m)| = 2 otherwise (exactly residues a % m and b % m).
+   - Any block with |Ones(m)| = 0 or > 2 is invalid and should trigger brute-force fallback.
+
+5) Decode {a, b} via unordered CRT:
+   - Let chosen moduli be m1, m2, ..., mk (pairwise coprime). For each j, we have Ones(mj) as above (size 1 or 2).
+   - Find u, v modulo M = m1*m2*...*mk such that, for every j, the multiset {u mod mj, v mod mj} equals Ones(mj).
+   - Do a DFS/backtracking over orientations per modulus:
+     - Start with congruences U: x ≡ 0 (mod 1), V: y ≡ 0 (mod 1).
+     - If |Ones(m)| = 1 with residue r, then enforce U ≡ r (mod m) and V ≡ r (mod m).
+     - If |Ones(m)| = 2 with residues {r1, r2}, branch on both assignments: (U ≡ r1, V ≡ r2) and (U ≡ r2, V ≡ r1).
+     - Merge congruences incrementally with CRT (extended GCD), keeping residues canonical in [0..mod-1].
+     - Prune: after each merge, ensure there exists some representative of the current congruence in [1..1000]. A helper hasSolutionInRange(res, mod) should return true iff ∃t such that x = res + t*mod ∈ [1..1000].
+   - After processing all moduli, enumerate actual candidates in [1..1000] from residues:
+     - For a congruence x ≡ r (mod m), the positive representatives in [1..1000] are {x = r (if r>0), r+m, r+2m, ...} and, if r≡0, {m, 2m, 3m, ...} until ≤1000.
+   - Combine U-candidates with V-candidates (Cartesian product), sort each pair (a ≤ b), deduplicate.
+
+6) Verification and robustness (critical due to adaptive grader):
+   - Reconstruct the exact bit vector from your sent queries (in the exact send order) for a candidate pair (a,b):
+     - For each sent robot defined by (m,r), the expected bit is 1 iff (a % m == r) or (b % m == r), else 0.
+   - Keep only candidate pairs whose simulated bit vector matches the received bits exactly.
+   - If multiple candidates match (rare with prime design), pick a unique one consistently (e.g., smallest a then b). If none match, use fallback.
+
+7) Fallback:
+   - If CRT/backtracking fails or yields no candidates, brute-force as last resort:
+     - Enumerate all pairs 1 ≤ x ≤ y ≤ 1000.
+     - For each pair, generate the exact bit vector for your sent queries in order and compare with the received answers.
+     - Select the unique matching pair if any. If multiple exist (unlikely), choose consistently (e.g., lexicographically smallest). If none, output a default valid pair like 1 1.
+
+8) Adaptive refinement if H > 1 (optional but allowed):
+   - If after the first "@", more than one candidate pair remains and you still have spare robots and hours, you may send additional targeted robots to split the candidate set (e.g., query a subset that contains exactly one of the two positions for roughly half of remaining candidates), then print "@" again and continue narrowing. Never exceed H or R. Default behavior should work with H=1 so keep this minimal and safe.
+
+Implementation notes and pitfalls:
+- Protocol format is strict: use spaces only; no commas anywhere in output lines.
+- Always flush after every output line ("? ...", "@", "! a b").
+- Maintain the exact send order to align responses. With H=1, send all robots first, then a single "@", decode, then print the answer. Never call "@" more than H times.
+- Implement CRT carefully:
+  - Write a standalone extended GCD function (no recursive lambdas) like:
+    long long extgcd(long long a, long long b, long long &x, long long &y)
+    returning gcd(a,b) and coefficients x,y such that a*x + b*y = gcd.
+  - Provide a robust crt_merge(a1,m1,a2,m2) that solves x ≡ a1 (mod m1), x ≡ a2 (mod m2) and returns (r, lcm) or (-1, -1) if incompatible. Use 128-bit intermed (__int128) for safe multiplication, keep result in [0..lcm-1].
+- Range helpers:
+  - hasSolutionInRange(r, m): true iff there exists x ≡ r (mod m) with 1 ≤ x ≤ 1000. For m > 1000 this is only when r ∈ [1..1000].
+  - enumerateInRange(r, m): returns all x ≡ r (mod m) in [1..1000] (use r, r+m, ..., or m,2m,... when r==0).
+- Complexity: With ~26-30 queries and at most a few DFS branches (≤ 2^k with k ≈ number of moduli blocks where |Ones(m)|=2), it’s tiny. Brute force over ≤ 500k pairs is also fine within limits.
+- Fast I/O is fine (ios::sync_with_stdio(false); cin.tie(nullptr);). But because this is interactive, you must flush after every output line.
+- Do not print any extra text (no logging, no debug prints, no commas, no extra spaces beyond single separators). The judge will reject extra output.
+
+Deliverable:
+- Output must be a single compilable C++17 program wrapped in:
+```cpp
+// code
+```
+with no additional explanation or text outside the code fence.

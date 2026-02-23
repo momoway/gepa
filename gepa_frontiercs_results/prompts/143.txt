@@ -1,0 +1,148 @@
+You are a competitive programmer. You will be given a problem statement (interactive Texas Hold’em training bot) and must implement a solution in C++. Your response must follow all instructions below precisely.
+
+CRITICAL output formatting (violations cause Wrong Answer):
+- Your final response must ONLY contain the C++ source code. No prose, no explanations, no extra lines before/after.
+- Wrap the code inside a Markdown code fence using ```cpp on the first line and ``` on the last line so it is properly formatted.
+- The code must compile as a single translation unit and be self-contained (no external dependencies and no extra files).
+
+Absolutely required I/O behavior:
+- Use token-based parsing only (operator>> on strings converted as needed). Do NOT rely on line-based reads.
+- After every single line you print, flush stdout immediately (e.g., by using std::endl which flushes, or std::flush).
+- Read and branch by exact tokens: "STATE", "ALICE", "BOARD", "RATE", "RATES", "ACTION", "OPP", "RESULT", "SCORE", and "-1".
+- If you ever read "-1" as a token at ANY time (even where a number is expected), exit immediately without printing anything further. Implement a readToken() that returns a string token and exits on "-1", and use it for ALL inputs, including places where numbers are expected (convert after checking for "-1").
+
+Game model (you can rely on these specifics):
+- Deck: 52 cards, suits 0..3, values 1..13 corresponding to ranks 2..A in strictly increasing order. Important: value 13 is Ace (rank 14).
+- Two players: You (Alice) and Bob.
+- You receive 2 private hole cards; up to 5 community cards appear: flop (3), turn (1), river (1).
+- Best 5-card hand out of 7 wins at showdown (standard poker). A-2-3-4-5 straight is valid and is the lowest straight. Suits only matter for flush/straight flush detection.
+- Pot starts at 10; both stacks start at 100 at the start of each hand.
+- Four betting rounds (you act first each round). At most one action from you and one response from Bob per round.
+- Your options each round: CHECK, FOLD, or RAISE x where 1 ≤ x ≤ your current stack a (integer).
+- Bob’s response:
+  - If you CHECK, Bob always CHECKs (no further bets this round).
+  - If you RAISE x, Bob either FOLDs or CALLs x based on 100 Monte Carlo rollouts. She assumes you CHECK all future rounds after she calls. Bob CALLs iff EV(CALL) > EV(FOLD).
+
+Interactive protocol (strict sequence; follow exactly and do not deviate):
+- Start: read a single integer G (number of hands, G ≤ 10,000). Read this via token-based read and exit if it is "-1".
+- For each decision point within a hand, the judge sends:
+  1) STATE h r a b P k
+     - h: 1-based hand index
+     - r: round in {1,2,3,4}
+     - a: your current stack (chips behind)
+     - b: Bob’s current stack
+     - P: current pot size
+     - k: number of revealed community cards; k ∈ {0,3,4,5}
+  2) ALICE s1 v1 s2 v2 (your two hole cards)
+  3) BOARD followed by 2k integers if k > 0; if k = 0 the line is exactly “BOARD” with no numbers.
+- Optional helper query (at most one per STATE; never exceed global budget):
+  - Print: RATE t (t must be a positive integer)
+  - Immediately after printing RATE, flush and then read exactly the next token which will be:
+    - RATES w d
+      - w: estimated probability you win outright
+      - d: estimated probability of a tie
+  - Do not read or consume any other tokens between RATE and RATES. The protocol guarantees the next message is RATES. Never issue more than one RATE per STATE.
+- Mandatory action (exactly one per STATE):
+  - Print exactly one of:
+    - ACTION CHECK
+    - ACTION FOLD
+    - ACTION RAISE x (1 ≤ x ≤ a)
+  - Flush immediately after printing the action line.
+- Judge responses:
+  - After ACTION CHECK:
+    - Judge prints: OPP CHECK
+    - Then either next STATE (if r < 4) or RESULT delta (if r = 4).
+  - After ACTION RAISE x:
+    - OPP FOLD: then RESULT delta (hand ends).
+    - OPP CALL x: then either next STATE (if r < 4) or RESULT delta (if r = 4).
+- RESULT delta: your integer profit for that hand (ending stack − 100). Consume it and proceed to next hand unless match ended.
+- After all G hands: judge prints SCORE W (double). Consume W and terminate cleanly without printing anything.
+
+Robust parsing and synchronization rules (avoid common WA causes):
+- Implement a token reader that:
+  - Uses operator>> to read the next whitespace-delimited token as string.
+  - Immediately exits if the token equals "-1".
+  - Converts tokens to integer/double only after checking for "-1".
+- For each STATE, perform at most one RATE and exactly one ACTION. Never print multiple ACTION lines for a single STATE.
+- After printing RATE, block until you read exactly one RATES with two doubles. Do not attempt to read or “recover” any other tokens between RATE and RATES.
+- Always clamp RAISE amounts to [1..a]; never print RAISE 0.
+- Handle "OPP" events: "OPP CHECK" (no extra), "OPP FOLD" (no extra), "OPP CALL x" (read x).
+- Handle "RESULT" by consuming its integer and moving on.
+- Handle "SCORE" by consuming W (double) and then terminate.
+- Never print any debugging/logging. Only print the exact allowed lines: "RATE t" or "ACTION ...".
+- Do not attempt to “resync” by consuming unexpected tokens; the judge follows the protocol strictly. If your code sees tokens in the documented order, proceed; otherwise, exit on "-1".
+
+RATE budget management (global hard limit):
+- Maintain a 64-bit counter of remaining sampling budget, initially 3,000,000.
+- The sum of all t you ever print in RATE lines must never exceed 3,000,000.
+- If budget is exhausted (remaining ≤ 0), skip RATE entirely for that STATE.
+- Allocate t per decision dynamically with higher weight for later streets. A safe allocation:
+  - Estimate remaining decisions: rem = (5 - r) + 4 * max(0, G - h)
+  - Per-street caps: cap[r] = {r=1: 40, r=2: 80, r=3: 160, r=4: 320}
+  - Weights: w[r] = {1,2,3,4}
+  - Compute t = min(cap[r], (budgetRemaining / max(1, rem)) * w[r]); clamp t to [0..budgetRemaining].
+- Only issue RATE if t > 0. After "RATES w d", set equity e = w + 0.5*d.
+
+Equity usage and fallback heuristics (no full evaluator needed):
+- If RATE is skipped:
+  - Preflop (k = 0): approximate equity from hole cards.
+    - Map values 1..13 to ranks 2..14 as r = v + 1 (Ace = 14).
+    - Start from base ~0.33; add for high ranks, pairs (strong bonus scaling with rank), suitedness (+), and connectivity (+ with diminishing returns). Penalize large gaps; clamp to [~0.33, ~0.80].
+  - Postflop (k > 0): default to e ≈ 0.50 if no sampling done.
+
+Action selection heuristic (simple and effective vs Bob’s CALL model that assumes future checks):
+- Let safeBet(x) = clamp(x, 1, a).
+- Use pot-based sizes and clamp to [1..a]. For jam, set x = a (all-in).
+- Never proactively FOLD in this framework (CHECK by default if not raising) because Bob never bets when checked to.
+- Deterministic RNG: use std::mt19937_64 with a fixed seed for reproducible bluff frequencies.
+
+Recommended policy:
+- River (r = 4):
+  - Jam (all-in) if e ≥ 0.64.
+  - Else value-bet around pot (0.75–1.25× pot; pick 1.0×) if e ≥ 0.56.
+  - Else bluff with 10–15% frequency if e ≤ 0.33 using ~1.0× pot.
+- Turn (r = 3):
+  - Jam if e ≥ 0.68.
+  - Else value-bet ~0.75× pot if e ≥ 0.62.
+  - Else bluff ~8% if e ≤ 0.33 using ~1.0× pot.
+- Flop (r = 2):
+  - Value-bet ~0.66× pot if e ≥ 0.60.
+  - Rare bluff ~5% if e ≤ 0.33 using ~0.8–1.0× pot.
+- Preflop (r = 1):
+  - Mostly check unless strong (e ≥ 0.62) then raise ~0.5× pot.
+  - Very occasional bluff ~3% if e ≤ 0.33 using ~0.75× pot.
+
+Implementation details:
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Use 64-bit integers for counters, stacks, and pot sizes.
+- Build small helpers:
+  - readToken(): returns next token as string; exits immediately on "-1".
+  - readLL()/readDouble(): wrappers around readToken() that convert after "-1" check.
+  - preflopEquityEstimate(): implement the heuristic mapping above.
+  - betSizePot(mult, P, a): returns safeBet(round(mult * P)).
+- Main loop:
+  - Read G via readToken().
+  - While reading tokens:
+    - On "STATE": read h, r, a, b, P, k (integers via readLL()); then read exact "ALICE" and its 4 ints; then read "BOARD" and 2k ints if k>0.
+    - Optionally issue RATE t per budget rule and read exactly one "RATES w d" response.
+    - Compute equity e (from RATES or fallback).
+    - Decide whether to raise and size x; if raising print "ACTION RAISE x"; else print "ACTION CHECK". Flush after printing.
+    - Then read subsequent top-level events: "OPP" (CHECK/FOLD/CALL x), "STATE", "RESULT delta", or "SCORE W". Consume appropriately. Never print any response except at your own decision points.
+    - On "RESULT": consume delta and continue to next hand.
+    - On "SCORE": consume W and terminate without printing anything.
+- Do not print anything other than:
+  - "RATE t" (at most once per STATE)
+  - "ACTION CHECK" or "ACTION FOLD" or "ACTION RAISE x"
+
+Common pitfalls to avoid:
+- Not wrapping the C++ source code in a single ```cpp ... ``` fence.
+- Printing any extra text, comments, or blank lines outside the code fence.
+- Forgetting to flush immediately after every RATE/ACTION line.
+- Exceeding the global RATE budget or issuing more than one RATE per STATE.
+- Desynchronizing by reading ahead or not blocking for "RATES" after a "RATE".
+- Incorrect mapping of card values: value 13 corresponds to Ace (rank 14).
+- Printing an out-of-range RAISE (must be 1 ≤ x ≤ a).
+- Continuing to print after reading "SCORE" or failing to exit immediately on reading "-1".
+
+Deliverable:
+- Provide exactly one C++ program implementing the above, inside ```cpp fenced block, with no additional text.

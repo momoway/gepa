@@ -1,0 +1,76 @@
+You are a competitive programmer. Implement an efficient, deterministic C++17 solution that constructs a full knight’s tour starting from a given square on an N×N board (6 ≤ N ≤ 666). Your response must ONLY contain the C++ code wrapped in ```cpp and ``` — no additional text.
+
+Problem:
+- Input:
+  - First line: integer N (6 ≤ N ≤ 666).
+  - Second line: integers r0 c0 — starting position (1-indexed).
+- Output:
+  - First print an integer l: the length of the path you output (include the starting cell).
+  - Then print l lines: the successive positions r c (1-indexed), starting with the given starting position.
+  - Do not print an extra empty line at the end.
+
+Goal:
+- For N ≥ 6, a full knight’s tour (length N*N) exists. You must output a full tour of length N*N starting at (r0, c0).
+- Each consecutive pair of cells in your path must be a legal knight move; no cell may repeat.
+
+Constraints and performance:
+- Time limit: 1 second. Memory limit: 128 MB.
+- Deterministic O(N^2) construction; no randomness, no timing-based early exit, no recursion/backtracking.
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- NN = N*N ≤ 443,556. Neighbor storage NN*8 ints ≈ 14 MB is OK.
+
+Required algorithm (deterministic Warnsdorff with tie-breaks and multi-order fallback):
+1) Index each cell as u = r*N + c using 0-based r, c internally.
+2) Precompute knight moves with a fixed base order of 8 deltas:
+   dr = { 2, 1,-1,-2,-2,-1, 1, 2}
+   dc = { 1, 2, 2, 1,-1,-2,-2,-1}
+   For each cell u, store:
+   - nbr[u*8 + i] = neighbor index (or -1 for unused slots).
+   - ndir[u*8 + i] = direction id i (0..7) for that neighbor.
+   - cnt[u] = number of valid neighbors (0..8).
+   Also store deg0[u] = cnt[u] (initial degree).
+3) At runtime, maintain:
+   - visited[u]: uint8_t (0/1).
+   - deg[u]: uint8_t (dynamic degree; initialize as deg0[u] for each attempt).
+   - path: vector<int> of size up to NN (reserve NN).
+4) Visiting a node u:
+   - Mark visited[u] = 1; append u to path.
+   - For each unvisited neighbor v of u, decrement deg[v] by 1.
+5) Selecting next move from current u:
+   - Among unvisited neighbors v of u, choose the one with:
+     a) Minimal deg[v] (Warnsdorff).
+     b) If tied, minimal “ones” = number of unvisited neighbors w of v with deg[w] == 1.
+     c) If still tied, use a deterministic priority by direction id based on a chosen attempt-specific move order (see step 6).
+   - Compute “ones” by iterating v’s neighbors and counting unvisited w with deg[w] == 1.
+   - All scans are over at most 8 neighbors; keep selection O(1) per step.
+6) Robustness via deterministic multi-order attempts:
+   - To increase reliability from any start, run the above greedy tour multiple times with different fixed tie-break priorities on direction ids.
+   - Use up to 8 attempts with different direction orders (e.g., the 8 cyclic shifts of the base order, plus optionally the reversed base order and its shifts if you want more, but keep it small and deterministic).
+   - For each attempt k:
+     - Build a prio[8] array that maps direction id -> rank (0..7) for that attempt.
+     - Reset visited[], deg[] = deg0[], path.clear().
+     - Run the greedy tour starting at start = (r0-1)*N + (c0-1).
+     - If path size reaches NN, stop and output it.
+   - This remains O(K * N^2) with small constant K (e.g., 8), well within limits.
+7) Important correctness details:
+   - Ensure variable names are consistent to avoid compile errors (e.g., if you compute a “sum” or “ones”, use the same identifier consistently; avoid typos like using an undefined sumDeg variable).
+   - Do not use recursion or backtracking.
+   - The very first printed pair must equal the input starting cell (r0, c0).
+   - Print exactly NN as the path length once you obtain a full tour.
+   - No trailing blank line after the last coordinate.
+
+Implementation notes:
+- Use flat arrays/vectors:
+  - nbr: vector<int>(NN*8, -1)
+  - ndir: vector<uint8_t>(NN*8, 0)
+  - cnt, deg0, deg, visited: vector<uint8_t>(NN, 0)
+  - path: vector<int>, reserve NN
+- When building adjacency, for each cell (r,c) scan all 8 base deltas; if inside board, store neighbor index and its direction id.
+- move selection tie-break uses prio[ndir] to break ties deterministically for the current attempt.
+- Conversion when printing: r = u / N + 1, c = u % N + 1.
+- Output exactly:
+  - First line: NN
+  - Then NN lines of coordinates, with '\n' between lines, and no extra newline after the last line.
+
+Final requirement:
+- Return ONLY the C++ code inside a single ```cpp code block and nothing else.

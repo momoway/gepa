@@ -1,0 +1,75 @@
+You are a competitive programmer. You will be given an interactive problem “Treasure Hunt” and must implement a robust solution in C++17. Your response must ONLY contain the C++ code, wrapped in a single ```cpp ... ``` block, with no additional explanation or text.
+
+Problem-specific details and constraints to adhere to:
+- Time limit: 5 seconds
+- Memory limit: 256 MB
+- The problem is interactive. You must read the interactor’s prompts from stdin and write your moves to stdout, flushing after each move.
+
+Goal:
+- The world is an undirected graph with n vertices and m edges.
+- You start at a fixed (but unlabeled during interaction) start vertex.
+- You do not see labels of adjacent vertices during interaction. At each step, the interactor provides only:
+  - d: the degree of the current vertex.
+  - For each of the d neighbors: its degree and a visited flag (0 if that neighbor hasn’t been visited yet by you at any prior point in this map, 1 if it has).
+- The ordering of neighbors at a vertex is adversarially shuffled on every visit.
+- You must visit all vertices; performance is scored based on the number of moves relative to a provided base_move_count:
+  - If moves <= base_move_count:
+      score = 100 - c * (sol_fraction - 1)
+      where c = 90 / sqrt(base_fraction - 1),
+            base_fraction = (base_move_count + 1) / n,
+            sol_fraction = (moves + 1) / n
+  - If base_move_count < moves <= 2 * base_move_count:
+      score = 20 * (1.0 - (moves + 1) / (base_move_count + 1))
+  - If moves > 2 * base_move_count: 0 points.
+
+Input/Output protocol:
+- First line: integer t (1 <= t <= 5), number of maps to solve.
+- For each map:
+  - One line: n m start base_move_count
+    - 2 <= n <= 300
+    - 1 <= m <= min(n(n-1)/2, 25n)
+    - 1 <= start <= n
+  - Next m lines: edges u v (1 <= u, v <= n). These labels are not usable during interaction because you never see labels while moving; treat edges as metadata if helpful but do not assume you can target specific labeled neighbors from the interactive prompt.
+  - Then the interaction begins. Repeatedly, the interactor prints either:
+    - A vertex description:
+      d deg_1 flag_1 deg_2 flag_2 ... deg_d flag_d
+      where:
+        - d is the degree of the current vertex.
+        - deg_i is the degree (in the static graph) of the i-th neighbor currently listed.
+        - flag_i is 0 if that neighbor hasn’t been visited yet across the entire run of this map, 1 otherwise.
+      You must then print a single integer i (1 <= i <= d), selecting that neighbor to move to. After printing, flush output immediately.
+    - Or a termination token:
+      - "AC" when you have visited all vertices.
+      - "F" when you exceed the move limit. After receiving "AC" or "F", immediately proceed to the next map (or terminate if it was the last one).
+- Important: Always flush after each chosen neighbor index. Never print anything besides the integer move and a trailing newline for each step. Never print extra whitespace, debug logs, or prompts.
+
+Parsing robustness:
+- Read using token-based extraction (operator>>). Tokens may be separated by arbitrary whitespace/newlines.
+- For each map, fully read the m edges before the interactive phase.
+- In the interactive phase, read the first token of each line as a string. If it is "AC" or "F", stop processing the current map and continue to the next one. Otherwise, interpret it as the integer d and proceed to read 2*d integers (deg_i, flag_i) pairs.
+- Do not assume any fixed neighbor ordering across visits to the same vertex; the order is shuffled each time.
+- The interactive prompt will not require a move when it prints "AC" or "F"; do not print anything after those tokens.
+
+Strategy requirements (to improve exploration quality and avoid poor cases observed with purely deterministic greedy):
+- Primary rule: If there exists any neighbor with flag_i == 0 (globally unvisited), always move to an unvisited neighbor.
+  - Among such neighbors, prefer the one(s) with the highest degree deg_i (intuitively maximizing frontier).
+  - Break ties randomly to avoid deterministic traps due to adversarial shuffling.
+- If all neighbors are already visited (all flag_i == 1):
+  - Prefer the neighbor with the highest degree deg_i to increase the chance of reaching new areas.
+  - Apply a small probability of randomization among the top candidates (e.g., choose among all neighbors whose degree is within 1 of the current maximum, randomly), to reduce two-node or small-cycle bouncing induced by shuffling.
+- Track whether a step led to discovering a new vertex:
+  - When you choose a neighbor with flag 0, you are guaranteed to visit a previously unvisited vertex; maintain a counter of newly discovered vertices for optional adaptive behavior.
+  - If you have a long streak without discovery (e.g., > 2n moves without encountering a flag 0), increase randomness temporarily to escape potential local traps.
+- Do not rely on mapping the current position to labeled vertices; since neighbor identity is hidden and neighbor order is shuffled, such mapping is generally ambiguous and brittle. Use only the provided degrees and visited flags to guide decisions.
+- Keep per-step complexity O(d), with n up to 300 and m up to 25n; data structures must be lightweight.
+
+Implementation details:
+- Use fast I/O but always explicitly flush after each move:
+  - Use: cout << (index) << '\n' << flush;
+- Seed RNG once per program start (e.g., with a fixed constant for reproducibility or with a time-based seed). Use it only for tie-breaking and controlled randomization.
+- Carefully handle the case where d >= 1 always holds in interactive states that require output. Do not print if the token is "AC" or "F".
+- Ensure the program processes all t maps and exits cleanly.
+
+Output formatting:
+- Your entire reply must be a single C++17 source code block wrapped in ```cpp and ```.
+- Do not include any explanation, comments outside the code block, or extra text before/after the code block.

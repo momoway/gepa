@@ -1,0 +1,116 @@
+You are a competitive programmer. You will be given a single-test problem and must implement a solution in C++. Follow these strict requirements carefully; your output will be judged automatically.
+
+Problem restatement (single test):
+- Input: a single integer n (1 ≤ n ≤ 10^12).
+- Output: exactly two lines:
+  - First line: an integer k (1 ≤ k ≤ 10^6), the length of your sequence.
+  - Second line: k integers a_1, a_2, ..., a_k (1 ≤ a_i ≤ n), strictly increasing, forming a valid BSU.
+
+BSU validity:
+- Strictly increasing values: a_i > a_{i-1} for all i ≥ 2.
+- Strictly increasing GCDs: gcd(a_i, a_{i-1}) > gcd(a_{i-1}, a_{i-2}) for all i ≥ 3.
+- A sufficient and safe condition to ensure the GCD rule is that each term divides the next, i.e., a_i is a multiple of a_{i-1}. Then gcd(a_i, a_{i-1}) = a_{i-1}, which strictly increases with the sequence. We will enforce this divisibility chain.
+
+Objective (heuristic; not strict optimality):
+- Maximize V = k × (sum of all a_i).
+
+Key approach:
+- Build sequences as multiplicative chains with integer multipliers ≥ 2 so that a_{i} is a multiple of a_{i-1}. This guarantees validity and strictly increasing GCDs.
+- For a given length k, if we require a_i ≥ 1 and a_k ≤ n, the minimal product of step multipliers is 2^{k-1}. Therefore feasible k satisfy 2^{k-1} ≤ n. Since n ≤ 10^{12}, k ≤ 41.
+- For each feasible k, choose a starting value a_1 and a sequence of integer multipliers m_1..m_{k-1} (each ≥ 2). Let P = floor(n / a_1) be the total multiplicative budget (i.e., the maximum possible product Π m_i such that a_k = a_1 × Π m_i ≤ n). We seek to distribute P across steps to maximize the sum. Front-loading larger multipliers to earlier steps boosts many subsequent terms and increases the sum more than putting everything into the last element.
+
+Greedy multiplier distribution (front-loaded, safe):
+- Work in unsigned __int128 (u128) for all multiplicative and additive intermediates.
+- For a fixed k and chosen a_1:
+  - Let P = floor(n / a_1) (u128).
+  - We need to pick m_1..m_{k-1} (each ≥ 2) s.t. M = Π m_i ≤ P.
+  - Let prod = 1 (u128), representing the product of already chosen multipliers.
+  - For i = 0..k-2 (this corresponds to m_{i+1}):
+    - remaining steps after choosing m_{i+1}: rem = (k - 1) - (i + 1) = k - i - 2.
+    - The minimal multiplicative need for the remaining steps is 2^{rem}.
+    - Cap the current multiplier so that prod × m_i × 2^{rem} ≤ P:
+      - denom = prod × 2^{rem} (all u128).
+      - maxMi = floor(P / denom) (u128).
+      - mi = max(2ULL, (ull)maxMi). Note: On the last step (rem = 0), mi = floor(P / prod) and is guaranteed ≥ 2 if k is feasible.
+    - Set m_{i+1} = mi, update prod *= mi.
+  - This saturates the available budget early while ensuring feasibility for the remaining steps.
+
+Search strategy:
+- Precompute powers of two safely using u128:
+  - p2 = [1, 2, 4, ..., 2^t] while 2^t ≤ n. The maximum feasible k is maxK = p2.size() because 2^{k-1} ≤ n.
+  - DO NOT access out-of-bounds indices. For n = 1, maxK = 1; do not loop k ≥ 2.
+- Always consider k = 1 explicitly with sequence [n].
+- For k from 2 to maxK inclusive:
+  - denom = 2^{k-1} = p2[k-1] (u128).
+  - Choose the largest feasible starting value a_1 = floor(n / denom) (ull). If a_1 == 0, skip.
+  - Set P = floor(n / a_1) (u128).
+  - Build multipliers m_1..m_{k-1} by the greedy rule above using u128 and p2.
+  - Build the sequence:
+    - seq[0] = a_1 (ull).
+    - For i=1..k-1: seq[i] = seq[i-1] × m_i (u128 -> cast to ull).
+  - Validate (as safety checks; they must all pass if implemented correctly):
+    - seq size is k.
+    - Strictly increasing: seq[i] > seq[i-1].
+    - Bounds: 1 ≤ seq[i] ≤ n for all i.
+    - Divisibility: seq[i] % seq[i-1] == 0 for all i ≥ 1.
+    - Optional extra safety (not needed if divisibility holds): gcd(seq[i], seq[i-1]) strictly increases.
+  - Compute sum = Σ seq[i] and V = sum × k in u128.
+  - Track the best result using a deterministic tie-breaker:
+    - Prefer larger V first.
+    - Then larger k.
+    - Then larger sum.
+    - (Any consistent deterministic tie-break is acceptable.)
+
+Optional local refinement for a_1 (small neighborhood):
+- The choice a_1 = floor(n / 2^{k-1}) is strong, but sometimes slightly smaller a_1 can increase P and yield a better sum.
+- For each k, you may also try a few nearby a_1 candidates: a_1 = baseA1 - delta for delta = 1..D while a_1 ≥ 1 (use a very small D like 10–50 to keep runtime negligible), rebuild the chain and keep the best. This is optional; do not let it blow up runtime.
+
+Critical implementation details and pitfalls (avoid WA/crashes):
+- Use unsigned __int128 (u128) for:
+  - powers of two,
+  - intermediate products (prod),
+  - P,
+  - seq construction multiplication checks (before casting to ull),
+  - sum and V.
+- All printed values (k and a_i) fit in 64-bit. Use unsigned long long (ull) for input n and for storing/printing the sequence.
+- Indexing:
+  - p2[0] = 1, p2[1] = 2, ..., p2[t] = 2^t.
+  - For a given k, denom = p2[k-1] (not p2[k]).
+  - For multipliers, rem = k - i - 2 for i in [0..k-2]; use p2[rem] (rem is always ≥ 0 in this loop).
+- Handle k = 1 explicitly before the loop over k ≥ 2.
+- Ensure every multiplier mi ≥ 2 to keep strict increase.
+- Ensure the final seq[i] never exceeds n.
+- No floating-point arithmetic anywhere; use integer division (floor) only.
+- Strict output format: exactly two lines; numbers separated by single spaces; trailing newline at the end; no extra prints or debug text.
+- Time: O(log n) candidates for k (≤ 41), each with O(k) operations; this is trivial within the limits.
+
+Program structure to follow:
+1) Read n as unsigned long long.
+2) Initialize best result with k = 1 and sequence [n]; bestSum = n; bestV = n.
+3) Precompute vector<u128> p2: start with {1}; while (p2.back() << 1) ≤ (u128)n, push_back(p2.back() << 1). Set maxK = (int)p2.size().
+4) For k in [2..maxK]:
+   - denom = p2[k-1]; a1 = (ull)((u128)n / denom); if a1 == 0, continue.
+   - For each chosen a1 (at least the base a1, optionally a few smaller ones):
+     - P = (u128)n / (u128)a1.
+     - Build multipliers m_1..m_{k-1} greedily (u128).
+     - Build seq, validate safety conditions.
+     - Compute sum, V (u128), and update best with the tie-breaker.
+5) Print:
+   - First line: bestK
+   - Second line: bestSeq elements separated by single spaces, then newline.
+6) Do not print anything else.
+
+Compilation/runtime constraints:
+- Target GNU++17.
+- You may use <bits/stdc++.h>, std::gcd if needed, vectors, etc.
+- Use fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).
+- All intermediate arithmetic that can exceed 64-bit must be done in unsigned __int128 to avoid overflow.
+
+Reminder:
+- Feasible k are exactly those with 2^{k-1} ≤ n.
+- For n = 1, p2 = {1}, maxK = 1; you must NOT iterate k ≥ 2.
+- Ensure no out-of-bounds access on p2.
+- Ensure strict increase and divisibility; this guarantees strictly increasing GCDs.
+- Ensure exact two-line output with no extra whitespace or commentary.
+
+Your response must ONLY contain the final C++17 solution code, wrapped in ```cpp and ``` with no extra explanations or text.

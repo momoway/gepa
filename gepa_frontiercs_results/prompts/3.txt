@@ -1,0 +1,145 @@
+You are a competitive programmer. Implement an interactive C++17 solution for the “lamp sockets on a ring” problem exactly as specified below. Your program must output only valid C++ code wrapped in ```cpp and ``` with no other text. Do not print prompts, logs, or debug information. Adhere exactly to the interactor protocol and always flush after every line you output. Never exceed protocol limits.
+
+Precise problem restatement and protocol:
+- There is a hidden simple cycle permutation p1..pn of labels 1..n arranged clockwise (wrap-around).
+- Two labels u and v are adjacent iff they are consecutive in the hidden permutation (including pn–p1).
+- The system maintains a persistent set S of “lit” labels; S persists across queries and starts empty.
+- A query is one line: an integer L ≥ 1, followed by L integers u1..uL (each in 1..n).
+  The system processes them sequentially; each ui toggles membership in S. After each toggle, it replies 0/1 indicating whether S now contains at least one adjacent pair (1 if yes).
+  Your program must read exactly L integers in response to each query, in order, updating your local mirror of S after each single toggle in the precise order you output.
+- When done, print one line: “-1 p1 p2 … pn” (any cyclic rotation or global reversal is accepted). This final line is not a query. Flush and exit immediately.
+
+Initial input:
+- The first line of stdin contains two integers: subtask and n. Read these first, before any output. All subsequent input consists of replies to your queries only.
+
+Strict protocol constraints you MUST follow:
+- Maintain an exact local mirror of S across the entire run:
+  - Keep vector<char> inS(n+1,0) as the ground truth.
+  - After each single reply (one integer) to a toggle you sent, immediately flip inS[ui] ^= 1. Never postpone.
+- Read exactly L replies for every single query you send, in order, even if you only need some of them.
+- Never “toggle a set” blindly. Only flip elements you actually intend to toggle. Do not include an element that is already off in a “turn-off” batch, or already on in a “turn-on” batch. Violating this corrupts your baseline state.
+- Robust baseline transitions: when changing the baseline (the set of nodes currently on, apart from temporary probes), always compute the flip-diff by comparing desired membership against inS only:
+  - Build toOff = [x | inS[x]==1 and x not in desired];
+  - Build toOn  = [x | inS[x]==0 and x in desired];
+  - Concatenate [toOff..., toOn...] and issue exactly one query for that transition.
+  - This guarantees the final S equals the desired baseline even if you previously lost track of which nodes should be on.
+  - For “x in desired” membership tests use a boolean array with a rolling integer tag (no O(n log n) sets). The observed on-set list (if kept) must be kept in exact sync with inS and only derived from inS updates you apply after each reply.
+- Keep the baseline as an independent set (no internal adjacent pair) at all times, except while temporarily probing a single vertex u, which you will immediately flip back off in the same query via a [u, u] pair.
+- Batch probing invariant: when probing a batch of candidates against a baseline H, the baseline S (which equals H) must be independent before the probe starts. For each candidate u, append exactly two toggles [u, u] in the same single query; record only the first reply (after turning u on) to detect adjacency with H; still read both replies and mirror inS after both toggles.
+- Always flush (cout.flush() or endl) after every query line you output and after the final answer line. No extra prints, spaces, or blank lines.
+
+Interactor limits (strict):
+- Max number of queries ≤ 1e7.
+- Sum of L across all queries ≤ 3e8.
+- Single query length L ≤ 1e7.
+- Time ~10s; use O(1) I/O per integer (ios::sync_with_stdio(false); cin.tie(nullptr);).
+- Use 64-bit counters where needed.
+
+Data structures you must maintain:
+- vector<char> inS(n+1, 0): exact mirror of S across the entire run. Update after EACH toggle reply.
+- Optional: maintain the current ON list onList (and position array pos) strictly synchronized with inS in issueQuery.
+- An integer-tagged membership array mark and curTag rolling counter for desired-baseline membership tests. When curTag nears INT_MAX, reset mark to zeros and curTag to 1 before reuse.
+- A function issueQuery(seq): prints “L seq...” on one line, flushes, then reads L replies; after each reply, immediately flips inS[seq[i]]^=1 (and mirrors onList/pos if you keep them). Returns the replies vector.
+- toggle(u): calls issueQuery({u}) and returns the single reply.
+- ensureBaseline(desiredOnSet): construct one sequence that first lists exactly those x with inS[x]==1 && x not desired, then those x with inS[x]==0 && x desired; issueQuery on the concatenated sequence. No-op if both empty. The “desired” membership MUST be determined only via the fresh mark array for that call. Never rely on any stale “current baseline list”; always trust inS.
+- batchProbeFilter(cand): for an independent baseline already ensured, build one sequence that appends [u, u] for each u∈cand; issue one query; return the sublist of cand whose first reply (after turning u on) was 1. Still read all 2|cand| replies and mirror inS after each toggle.
+- Edge storage: For each node keep up to two neighbors. Use vector<array<int,2>> adj(n+1, {-1,-1}). add_edge(u,v) inserts u↔v if not present, up to two per node. Guard against duplicates and u==v. If both slots are already filled, do not insert further (the algorithm must prevent overfilling).
+
+High-level algorithm (safe and efficient):
+A) Build a maximal independent set I and leave it ON as the baseline:
+- S is initially empty.
+- For v=1..n:
+  - r = toggle(v).
+  - If r==1, immediately toggle(v) again (revert; do not keep v).
+  - If r==0, keep v on and include v in I.
+- At the end, S=I is an independent set and maximal (each excluded vertex has at least one neighbor in I). For a cycle, every vertex in I has exactly two U-neighbors (since I has no internal edges).
+
+B) Find all U–I edges using divide-and-conquer (D&C) on I while keeping the baseline independent:
+- Let U = V \ I.
+- dom = I in the order you kept them (fixed for recursion splits; any fixed order is fine).
+- Define solve_I(dom, l, r, candU):
+  - Baseline invariant: before probing under [l,r), S equals exactly dom[l..r) (enforce with ensureBaseline right before the batch at that node).
+  - If candU is empty, return.
+  - If r-l==1: let v=dom[l]; for all u in candU, add_edge(u,v); return.
+  - Let m=(l+r)/2.
+    - Ensure baseline H=dom[l..m): ensureBaseline(H).
+    - Probe batch over candU via [u,u] to select candL (ans[2*i]==1).
+    - Recurse solve_I(dom, l, m, candL).
+    - Ensure baseline K=dom[m..r): ensureBaseline(K).
+    - Probe batch over candU to select candR, then solve_I(dom, m, r, candR).
+- Start with ensureBaseline(I) then call solve_I(dom=I, l=0, r=|I|, candU=U).
+- This finds, for every u∈U, all its neighbors in I (0, 1, or 2). In a cycle with I maximal, each I has two U-neighbors; each U has 0, 1, or 2 I-neighbors.
+
+C) Correctly find the U–U edges by batching from an independent subset of degree-1 U endpoints:
+- After step B, compute degI[u] = number of neighbors of u found in I (count adj entries that are in I).
+- Let P = { u ∈ U | degI[u] == 1 } (exactly the U endpoints adjacent to I on exactly one side; their other neighbor must lie in U).
+- Reset baseline to empty: ensureBaseline({}).
+- Build an MIS K within P (K is independent because P induces a matching in a cycle):
+  - For each u∈P (in any fixed order):
+    - r = toggle(u).
+    - If r==1, toggle(u) again (do not include u);
+    - Else keep u on and include u in K.
+  - At the end S=K is independent.
+- Let C = U \ K (all U nodes not in K). Note C may contain adjacent pairs; do NOT use C as baseline.
+- Now discover all U–U edges adjacent to K by D&C with dom=K (independent) and cand=C:
+  - Ensure baseline K: ensureBaseline(K).
+  - Run the same D&C routine with dom = K and candU = C:
+    - solve_UU(dom=K, l=0, r=|K|, candU=C), identical structure to solve_I above; at leaf {v} (v∈K) add_edge(v, u) for every u in candU reported by the batch as adjacent.
+  - Rationale: For each u∈K (degI==1), exactly one of its two cycle neighbors lies in U; that neighbor resides in C, and batch probing against subsets of K correctly isolates it. By excluding I from cand, we avoid re-adding known U–I edges.
+- This pass finds all U–U edges incident to endpoints in K; by symmetry (since every U–U edge has exactly one endpoint in K when K is an MIS of P), this recovers all missing U–U edges.
+
+D) Verification and robust fallback cleanup (guarantee correctness):
+- Expected degree is 2 for n≥3 and 1 for n==2. For n==1, handle trivially (perm=[1]).
+- Compute degrees from adj. If all nodes meet expected degree, proceed. Otherwise, run a robust cleanup:
+  - Set baseline empty: ensureBaseline({}).
+  - Let need = { u | deg(u) < expected }.
+  - For each u in need:
+    - Ensure only u is on: ensureBaseline({u}).
+    - For every v ≠ u (iterate v=1..n):
+      - Skip if adj[u] already contains v.
+      - Probe v by sending a single query [v, v] (append both toggles in one query). Read both replies and mirror inS on each. If the first reply is 1, then add_edge(u, v).
+      - Stop early for this u if deg(u) reaches expected.
+  - Re-verify that all degrees reach expected. If still not, repeat for any remaining nodes; this guarantees completion even if earlier logic missed edges.
+
+E) Reconstruct the permutation from the undirected cycle graph:
+- For n==1: permutation is [1].
+- For n==2: find the single edge a-b in adj; output [a,b] (either order).
+- For n≥3: find any start s with degree 2. Walk the cycle:
+  - prev=-1, cur=s; for i from 0 to n-1:
+    - p[i]=cur.
+    - Let a=adj[cur][0], b=adj[cur][1].
+    - next = (a != prev ? a : b).
+    - prev = cur; cur = next.
+- Output exactly: “-1 p1 p2 … pn”, flush, and exit.
+
+Crucial pitfalls to avoid (these caused WA in practice):
+- The U–U stage must have dom=K (independent MIS of endpoints P) and cand=C=U\K; do NOT invert (using dom=R=P\K and cand=K only finds endpoints-to-endpoints edges and misses interior U nodes).
+- Always ensure the baseline used for any batch probe is independent. Never use a candidate pool as baseline if it may contain edges.
+- Always mirror S strictly: update inS[u]^=1 immediately after reading each reply for ui, every time, in order. Maintain any auxiliary on-set list strictly from inS updates only.
+- Baseline transitions must be computed against inS, not against any stale “current baseline list”. Use a rolling-tag mark array to mark desired in O(|desired|) and build [toOff..., toOn...] exactly once per transition.
+- When batch probing [u,u] pairs, you must read all 2|cand| replies and update inS after each toggle, even if you only use the first reply of each pair.
+- Ensure that at each recursion node you call ensureBaseline for dom[l..r) right before probing under that node; do not assume prior state.
+- Use ios::sync_with_stdio(false) and cin.tie(nullptr) exactly once at startup. Read the initial (subtask, n) before any output. Always flush after every query line and after the final answer line.
+
+Implementation scaffolding in C++:
+- Main sets fast I/O once, reads subtask and n, constructs solver, and calls run().
+- Helper functions:
+  - issueQuery(const vector<int>& seq)
+  - toggle(int u)
+  - ensureBaseline(const vector<int>& setOn)
+  - batchProbeFilter(cand)
+  - solveRec(dom,l,r,cand): as described above; enforce baseline for dom[l..r) before probing; at leaves, add edges.
+  - add_edge(u,v): prevent duplicates; update adj[u] and adj[v]; ensure ≤2 neighbors per node.
+- Use 64-bit types for accumulations of counts/sizes (sum of L, total toggles, etc.).
+
+Final I/O:
+- Print exactly one line: “-1 p1 p2 … pn”, followed by newline. Flush. Exit immediately.
+- Do not print anything else at any time (no debugging, no comments, no extra lines).
+
+Scoring/limits context (non-adaptive interactor):
+- The judge is non-adaptive. Query count and total operations are constrained (≤1e7 queries, ≤3e8 total toggles, ≤1e7 per query).
+- The algorithm above stays well within limits for n up to 1e5: MIS phases are O(n), U–I D&C is ~O((|I|+|U|) log |I|), and the corrected U–U pass with dom=K and cand=U\K is O(|U| log |K|). The fallback is rarely triggered and limited to unresolved vertices but guarantees correctness.
+
+Deliverable:
+- Output only valid C++17 code wrapped in ```cpp ... ``` with no other text.
+- The code must strictly follow the interactor protocol and the invariants above, and must flush after every query and after the final answer.

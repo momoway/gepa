@@ -1,0 +1,76 @@
+You are a competitive programmer. Implement a correct, efficient, and cost-minimizing C++ solution for the following constructive optimization problem.
+
+Task summary
+- Construct a rectangular grid of characters with exactly:
+  - b black 4-connected components (symbol '@')
+  - w white 4-connected components (symbol '.')
+- 4-connected means adjacency by sides only (up, down, left, right); diagonal adjacency does not connect components.
+- Minimize weighted cost: cost = x * (# of black tiles) + y * (# of white tiles)
+
+Input
+- One line with four integers: b, w, x, y (1 ≤ b, w ≤ 1000; 1 ≤ x, y ≤ 1000)
+
+Output
+- First line: two integers r c — rows and columns (1 ≤ r, c ≤ 100000)
+- Then r lines each with c characters, each '@' or '.'
+- Total number of tiles r*c must not exceed 100000
+
+Core construction idea and why it minimizes cost
+- Let M = max(b, w), m = min(b, w).
+- Let Maj be the color with M components, Min the other.
+- Each Maj component needs at least one Maj tile ⇒ #Maj tiles ≥ M. We will achieve exactly M Maj tiles.
+- In a compact 2-row scaffold, placing one Maj per column alternately between top and bottom rows makes every Maj tile isolated (no 4-adjacency among Maj). The complementary Min tiles at those columns are initially all isolated too (M Min components).
+- To reduce Min components from M down to m (when M > m), we must connect Min tiles. Two isolated Min tiles in the 2-row alternating scaffold are diagonal neighbors; to connect two diagonals with 4-connectivity in a grid requires at least 2 extra Min tiles. Therefore, reducing Min components by t = M - m requires at least 2t additional Min tiles. Our construction adds exactly 2t Min tiles, so the Min tile count is minimal. Since x, y > 0, minimizing per-color tile counts minimizes the weighted cost.
+
+Strict construction to guarantee correctness and minimal cost
+Use exactly one of the following cases.
+
+Case 1: |b - w| ≤ 1 (balanced or near-balanced)
+- Use a single row (r = 1, c = b + w).
+- Fill it with strictly alternating colors, starting with the color that has the larger number of components (Maj). If b == w, either start color is fine.
+- This gives exactly b black and w white components, each of length 1 ⇒ #black tiles = b and #white tiles = w, which is optimal.
+- Constraint check: c = b + w ≤ 2000, so r*c ≤ 100000 holds.
+
+Case 2: |b - w| > 1 (one color is the majority)
+- Without loss of generality, define Maj as the color with component count M, Min with m; let t = M - m ≥ 2.
+- Use two rows (r = 2).
+- Build M "primary" columns (P-columns), each with exactly one Maj tile and one Min tile:
+  - For i = 0..M-1:
+    - If i is even: put Maj on top and Min on bottom at this column.
+    - If i is odd: put Min on top and Maj on bottom at this column.
+  - This alternating placement ensures every Maj tile is isolated: no vertical Maj (opposite cell is Min) and no horizontal Maj adjacency (successive Maj tiles are in different rows).
+- To merge Min components down to exactly m, insert t "separator" columns (S-columns), each with Min on both cells (vertical Min), between some pairs of consecutive P-columns:
+  - Place one S-column in any t distinct gaps among the (M - 1) gaps between consecutive P-columns (e.g., leftmost t gaps).
+  - Each inserted S-column connects the Min tile from the left P-column to the Min tile from the right P-column via a vertical+horizontal path, reducing the number of Min components by exactly 1.
+- After inserting t S-columns, total columns c = M + t = 2*M - m.
+- This achieves exactly M Maj components and m Min components.
+- Size check: r*c = 2*(2*M - m) ≤ 4*1000 = 4000, well within the 100000 limit.
+
+Color mapping
+- If b ≥ w: Maj = '@', Min = '.'.
+- Else: Maj = '.', Min = '@'.
+- Construct using the above scheme with these characters.
+
+Implementation details
+- Read b, w, x, y.
+- If |b - w| ≤ 1:
+  - r = 1, c = b + w.
+  - Start with Maj color, strictly alternate c cells.
+- Else:
+  - M = max(b, w), m = min(b, w), t = M - m.
+  - r = 2, c = M + t.
+  - Build strings row0, row1:
+    - For i in [0..M-1]:
+      - Append a P-column: if i%2==0 add (Maj to row0, Min to row1), else (Min to row0, Maj to row1).
+      - If i < M-1 and t > 0: append one S-column (Min to both rows) and decrement t.
+- Output r, c, then the two rows (or single row in Case 1).
+- Time: O(r*c) for construction and printing. Memory: O(c).
+- Do not introduce columns with two Maj tiles (would merge Maj vertically).
+- Only insert S-columns between P-columns; none at the ends (they wouldn't change component counts but would waste tiles).
+
+Important output instructions
+- Your response must ONLY contain the C++ code, with no extra text.
+- Wrap the code in triple backticks with the language tag cpp:
+  ```cpp
+  // code
+  ```

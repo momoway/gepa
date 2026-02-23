@@ -1,0 +1,163 @@
+You are a competitive programmer solving an interactive “Problem H. Hack”-style timing side-channel problem. Implement a solution in C++ that follows the protocol exactly and fits within the time/memory limits. Your response must contain ONLY the C++ code wrapped in ```cpp and ``` with no additional text.
+
+Strict interactive protocol and I/O:
+- Read integer n from stdin first (the judge prints it).
+- To ask a query: print exactly "? a" (with a in [0, n-1]), then flush (use std::endl or cout.flush()), and read the response time T(a) (unsigned 64-bit) from stdin.
+- To finish: print exactly "! d", flush, and exit immediately; do not print anything else.
+- Exactly one final answer must be issued; total number of queries must be ≤ 30000 (including all "? a" and excluding the final "! d").
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr); and always flush after each query and the final answer.
+- Do not print any extra output or whitespace besides the required lines.
+
+Device model (implement prediction to match judge exactly):
+- The device computes modPow(a, d, n) with this pseudocode:
+  1 modPow(a, d, n) {
+  2   r=1;
+  3   for (i=0;i<60;++i) {
+  4     if ((d&(1<<i))!=0) {
+  5       r=r*a%n
+  6     }
+  7     a=a*a%n;
+  8   }
+  9 }
+- The loop is exactly 60 iterations (i = 0..59).
+- Only modular multiplications on lines 5 and 7 cost time; other operations are free.
+- The time for x*y mod n is (bits(x)+1) * (bits(y)+1) nanoseconds, where:
+  - bits(0) = 0
+  - for x > 0, bits(x) = floor(log2(x)) + 1 = 64 - __builtin_clzll(x)
+- n = p*q with p, q random 30-bit primes, hence n is ~60 bits. d is uniformly random in [1..phi(n)-1], coprime to phi(n).
+- Use 128-bit intermediate arithmetic for modular multiplication to avoid overflow: (__uint128_t)a*b % n.
+
+Exact bit-length and cost rules (must match judge):
+- Implement bits(x) exactly: bits(0)=0; else 64-__builtin_clzll(x). Never call __builtin_clzll with 0.
+- For squaring at iteration i, value v is a_i before squaring; its cost is (bits(v)+1)^2.
+- Multiply cost in line 5 at iteration i is (bits(r_before)+1) * (bits(a_i)+1), where:
+  - a_i is the loop’s current a before squaring (i.e., a^(2^i) mod n),
+  - r_before is r just before the conditional multiply at i.
+
+Per-query precomputation (must be exactly this):
+- For each queried a, precompute for i=0..59:
+  - a_i = a^(2^i) mod n with a_0 = a and a_{i+1} = a_i^2 mod n (use mulmod with 128-bit intermediate).
+  - bp1[i] = bits(a_i) + 1 (uint8_t is sufficient; max 61).
+- Precompute Ssq(a) = sum_{i=0..59} (bp1[i]^2), the total squaring cost, independent of d.
+
+Prediction model F(a; d) (must match device exactly):
+- Given a and mask d over 60 bits (i=0..59):
+  - total = Ssq(a)
+  - r = 1
+  - For i in 0..59:
+    - If bit i of d is 1:
+      - total += (bits(r)+1) * bp1[i]
+      - r = (r * a_i) % n
+- Return total.
+
+Deterministic “calibration” queries (issue these 3 first and use them to fix constraints):
+1) Query a = 1:
+   - a_i = 1 for all i; each square costs (1+1)^2 = 4.
+   - Each conditional multiply (when d_i = 1) costs (1+1)*(1+1) = 4, and r stays 1.
+   - From T1 = T(1), compute popcount(d) = K = (T1 - 60*4) / 4 = (T1 - 240) / 4.
+     - K must be an exact integer; keep it as int.
+2) Query a = 0:
+   - a_i = 0 for all i; each square costs (0+1)^2 = 1; total squaring cost 60.
+   - Since d ≥ 1, the first set bit makes r:1→0 (cost (1+1)*(0+1) = 2), and subsequent multiplies (if any) cost 1 each; hence T0 = 60 + (K + 1) = 61 + K. Cross-check; in a noiseless judge they must match exactly.
+3) Query a = n - 1:
+   - Let L = bits(n-1) + 1.
+   - a_0 = n - 1; a_1 = 1; then a_i = 1 for all i ≥ 1.
+   - Squaring cost S = L*L + 59*4.
+   - Multiply cost:
+     - If d_0 = 0: multiply remainder = 4*K.
+     - If d_0 = 1: multiply remainder = 2*L*K.
+   - From Tm1 = T(n-1), compute rem = Tm1 - S and determine d_0 by exact equality with 4*K or 2*L*K (if neither matches exactly due to an implementation mistake, pick the closer, but this should not happen in a correct implementation).
+
+Random queries and data collection:
+- Pick Q random values a uniformly from [0, n-1], excluding 0, 1, and n-1. Avoid duplicates.
+- Choose Q large enough for robust statistics but within the query/time limits. Recommended: Q in [18000..22000] (use 20000 unless n is very small where you must cap by n-3). Ensure total queries = Q + 3 ≤ 30000.
+- For each random a:
+  - Issue "? a", read T(a).
+  - Precompute and store ai[60], bp1[60], and Ssq(a) exactly as specified.
+
+Initial estimation via correlation (multi-pass, low→high), with enforced bit 0 and popcount:
+- Maintain, for each query, known contributions = Ssq(a) + contributions from already-decided bits and their effect on r.
+- Do 4 passes. In each pass:
+  - Reset rcur[a] = 1 and known[a] = Ssq(a).
+  - For i from 0 to 59:
+    - Compute, for each a, instantaneous weight w_i(a) = (bits(rcur[a])+1) * bp1[a][i].
+    - Residual R(a) = T(a) - known[a].
+    - Accumulate score S_i = sum_a w_i(a) * R(a).
+    - Decide bit i in this pass:
+      - If i==0, force to the value from the a=n-1 test.
+      - Otherwise set to 1 if S_i > 0, else 0.
+    - If bit i is set, update for all a:
+      - known[a] += w_i(a)
+      - rcur[a] = (rcur[a] * ai[a][i]) % n
+  - Record this pass’s S_i for all i for use in ranking.
+
+Build the initial mask with exact K and fixed bit 0 (improved, robust):
+- Let K = popcount(d) from a=1 and enforce bit 0 = d_0 from a=n-1.
+- Build a ranked list of bits i in 1..59 by the last-pass S_i (descending; tie-break by smaller index).
+- Instead of turning on all top bits at once, select exactly K - d_0 bits greedily to respect the r-dependence:
+  - Start with mask m having only bit 0 = d_0.
+  - Maintain per-query rcur=1 and known=Ssq(a).
+  - For t from 1 to (K - d_0):
+    - For each candidate j in {1..59} that is currently 0 in m, compute S_j = sum_a w_j(a) * (T(a) - known[a]) where w_j(a) = (bits(rcur[a])+1) * bp1[a][j].
+    - Pick j with maximum S_j (tie-break by smaller j), set bit j in m.
+    - For all a: known[a] += w_j(a); rcur[a] = (rcur[a] * ai[a][j]) % n.
+- This greedy respects the dependence of w’s on previously set bits and yields a much better starting point than selecting by static top scores.
+
+Exact error function (noiseless; true solution gives E=0):
+- Define E(d) = sum_a (T(a) - F(a; d))^2, using long double for accumulation.
+- Maintain, for each query a, predicted time P(a) = F(a; d), residual R(a) = T(a) - P(a), and an array rprefix[a][i+1] for i=0..59 where:
+  - rprefix[a][0] = 1
+  - rprefix[a][i+1] = rprefix[a][i] if bit i is 0; else rprefix[a][i+1] = (rprefix[a][i] * ai[a][i]) % n
+- Also maintain per-query per-bit multiply contributions c[a][i] = (bits(rprefix[a][i])+1) * bp1[a][i] if bit i is 1; else 0. Then P(a) = Ssq(a) + sum_i c[a][i].
+- Types: c[a][i] fits in uint16_t (max 3721), per-query Ssq fits in uint32_t, per-query sums fit in uint64_t, T and P in uint64_t, residual in int64_t, E in long double.
+
+Local search refinement with exact deltas (carefully implemented):
+- Goal: find exact d with E(d)=0 while preserving constraints:
+  - bit 0 fixed to d_0
+  - popcount(d) fixed to K
+- Iterative improvement loop:
+  1) Compute E(d). If E(d)==0, output and exit.
+  2) Build approximate candidate lists:
+     - For each unset bit j≥1, approximate gain G_on[j] = sum_a (bits(rprefix[a][j])+1) * bp1[a][j] * R(a). Larger G_on suggests turning j on reduces error.
+     - For each set bit i≥1, approximate “off” score G_off[i] = sum_a (bits(rprefix[a][i])+1) * bp1[a][i] * R(a). More negative G_off suggests turning i off reduces error if we could.
+     - Select a shortlist: top 32 j’s by G_on and top 32 i’s by -G_off (if sets smaller, take all).
+  3) For all pairs (i in shortlist_off, j in shortlist_on), i≠j, evaluate the exact E(d') for d' that swaps: turn off bit i, turn on bit j (bit 0 unchanged), by recomputing, for each query a, only the suffix from t = min(i, j) to 59:
+     - Recompute rprefix[a][t..59], c[a][t..59] under the toggled mask:
+       - Start rp = rprefix[a][t].
+       - For k=t..59:
+         - oldb = bit k in current mask; newb = oldb; if k==i newb=false; if k==j newb=true.
+         - old_c = c[a][k].
+         - new_c = 0; if newb: new_c = (bits(rp)+1)*bp1[a][k], then rp = (rp * ai[a][k]) % n.
+         - P(a) += (new_c - old_c); update c[a][k] to new_c; update rprefix[a][k+1] to rp.
+     - After the suffix loop, R(a) = T(a) - P(a). Accumulate new E(d').
+     - Pick the pair with strictly smaller E; if found, apply the swap (update mask and all caches) and go back to step 1.
+  4) If no improving pair is found in the shortlist, widen shortlist once (e.g., to 64 or 96). If still none, proceed to random restarts.
+
+Important implementation details to avoid subtle bugs:
+- When building state for a new mask (initial or during restarts), compute P, R, rprefix, c, and E(d) from scratch to ensure internal consistency before local search.
+- In apply_swap, after updating caches from t=min(i,j) onward, recompute rprefix, c, P, and R consistently; then recompute E(d) as sum of squared residuals (to avoid numerical drift).
+- Use __uint128_t in mulmod; never use floating point for bits or modulo.
+- Never call __builtin_clzll with 0; handle bits(0)=0 explicitly.
+- All output must strictly follow the protocol (no extra lines or spaces).
+
+Random restarts (if E>0 persists after local search):
+- Build alternative initial masks respecting bit 0 and popcount K by perturbing the greedy choice:
+  - Use the ranked list from correlation (last pass S_i). Choose K - d_0 bits randomly among the top M (e.g., M=100), initialize mask, build caches, then run local search. Keep the best mask. Try a few restarts (e.g., 4–6) or until E=0.
+
+Adaptive query budget (optional but useful):
+- If after all restarts E(d) > 0, issue an extra batch of random distinct queries (e.g., +4000 to reach ~24000 total, still ≤ 30000 with specials), recompute correlation, rebuild the greedy mask, then rerun local search and restarts.
+
+Termination and output:
+- After refinement (and possible restarts), recompute E(d) exactly on all collected queries.
+- If E(d) == 0 and constraints (bit 0 = d_0, popcount K) hold, print exactly "! d" and flush, then exit.
+- If, unexpectedly, E(d) > 0 after all attempts (should be rare with sufficient Q), still print the best-found d respecting constraints. Ensure only a single final answer is printed.
+
+Performance and memory:
+- Use Q around 20000 initially (plus 3 specials = 20003 ≤ 30000).
+- Pre-allocate vectors and avoid reallocation in inner loops. Reserve capacities for queries and internal arrays (ai, bp1, Ssq, rprefix, c, etc.) to fit within memory (≈ tens of MB).
+- Random generator: seed deterministically from n xor a high-resolution clock; sample a = rng()%n, skipping 0, 1, n-1 and avoiding duplicates. Uniformity over [0..n-1] is sufficient for this task.
+
+Edge-case checks (noiseless judge implies exact equalities):
+- K from a=1 and a=0 must match exactly; if not, recompute carefully; do not proceed with inconsistent K.
+- d_0 determination from a=n-1 must match one of the two formulas exactly; no ambiguity for ~60-bit n.
+- Validate that (T1 - 240) is divisible by 4; that (T0 - 60) == K+1; and that Tm1 - (L*L + 59*4) equals either 4*K or 2*L*K.

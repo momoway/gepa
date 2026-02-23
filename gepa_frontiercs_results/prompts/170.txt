@@ -1,0 +1,104 @@
+You are a competitive programmer. You will be given a heuristic scheduling/assignment problem (AtCoder AHC044-like “rotor-router scheduling”) with a strict input/output format. Implement a fast, always-valid C++17 solution and output only the code wrapped in ```cpp ... ``` with no extra text before or after the code block.
+
+Task summary:
+- There are N employees (indices 0..N-1). In all tests: N=100.
+- We plan L weeks. In all tests: L=500000.
+- Week 1 is employee 0.
+- For each employee i, choose two integers a_i and b_i (0 ≤ a_i, b_i ≤ N-1).
+- Weekly transition rule (deterministic rotor-router toggling per node):
+  - Let x be the employee who cleaned last week.
+  - Let t be how many times x has cleaned up to last week inclusive (i.e., after incrementing this week’s visit).
+  - If t is odd, the next is a_x; if t is even, the next is b_x.
+- Targets T_i are given (0 ≤ T_i ≤ 10000, sum T_i = L). Let t_i be actual counts over L weeks.
+- Minimize E = sum_i |t_i − T_i|. Score is 1,000,000 − E (non-negative).
+- A submission is judged WA or TLE (score zero) if output is illegal (e.g., out-of-range indices, wrong number of lines, extra text) or time/memory limits exceeded. Always prioritize producing a valid, fast output.
+
+Input format:
+- Line 1: N L (N=100, L=500000)
+- Line 2: T_0 T_1 ... T_{N-1}
+- All values are integers. Sum(T) = L.
+
+Output format (strict):
+- Exactly N lines:
+  - Line i: a_i b_i
+- Each a_i, b_i must be integers in [0, N-1].
+- No extra lines, spaces, or commentary beyond the two integers per line.
+
+Performance constraints and implementation requirements:
+- Time: Keep comfortably under ~2s TL. Aim O(L) or O(L + N log N) per build/simulate pass. N=100, L=5e5.
+- Memory: Small. Use 64-bit (long long) for counts and error accumulation.
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Deterministic: avoid randomness or fix a seed (but do not rely on stochastic methods).
+- No debugging prints. Output exactly N lines and terminate.
+- Ensure all a_i, b_i are assigned (no uninitialized values) and within [0..N-1].
+- If input parsing fails, still output a trivial valid mapping (fallback below).
+
+Rotor-router interpretation (critical modeling details):
+- The process is a deterministic walk on a directed multigraph, with exactly two outgoing edges per node (to a_u and b_u).
+- If a node u is visited cnt[u] times in total over the entire L-week sequence:
+  - The number of times edge (u -> a_u) is taken is:
+    - Normally ceil(cnt[u]/2), except if u is the last visited node: then decrement by 1 when cnt[u] is odd (since the final visit does not transition).
+  - The number of times edge (u -> b_u) is taken is:
+    - Normally floor(cnt[u]/2), except if u is the last visited node: then decrement by 1 when cnt[u] is even.
+- Total number of transitions equals L − 1 (no transition after the last week).
+- Incoming transitions to node v over L weeks should roughly match:
+  - Let R[v] be desired incoming counts. Since week 1 is employee 0 before any transition, set:
+    - R[v] = T[v] for all v, then do R[0] = max(0, T[0] − 1).
+  - Sum_v R[v] = L − 1.
+
+Recommended constructive heuristic (fast and robust):
+1) Start with an estimated visit count vector cnt, e.g., cnt = T.
+2) Choose a candidate “last” node `last` to reconcile the fact that total outgoing transitions are L − 1, not L. Good deterministic choices to try:
+   - last = 0
+   - last = argmax_i cnt[i] (break ties by smaller index)
+   - Optionally also try argmax_i T[i], or keep the previous best last across iterations
+   Try a small fixed set (e.g., 2–4) of candidates and keep the best result by E after simulation.
+3) From cnt and chosen last, compute outgoing edge weights per node u:
+   - outcnt[u] = cnt[u]
+   - The total number of transitions that originate from u equals outcnt[u], except for u == last where it is outcnt[u] − 1.
+   - Translate outcnt[u] to rotor edge multiplicities respecting parity:
+     - wA[u] = ceil(outcnt[u]/2)
+     - wB[u] = floor(outcnt[u]/2)
+     - Additionally, if u == last, decrement:
+       - If cnt[u] is odd: wA[u] -= 1
+       - Else (cnt[u] even): wB[u] -= 1
+     - Clamp to ≥ 0 just in case, and note that sum_u (wA[u] + wB[u]) should be exactly L − 1.
+4) Allocate these 2N edges to destinations to match incoming demands R:
+   - Maintain remaining demand R[v] (with R[0] adjusted as above).
+   - Create a list of 2N edges with weights wA[u], wB[u] tagged by (u, type) where type=0 for a, type=1 for b.
+   - Sort edges by weight descending. Use deterministic tie-breaking by u then type.
+   - Maintain a max-heap over (R[v], v). Repeatedly:
+     - Take the current heaviest edge and assign it entirely to the node with highest remaining demand.
+     - Decrease that node’s remaining demand by the full edge weight; push back if still positive.
+   - If, due to any rounding/clamping, the heap empties early (R consumed), assign remaining edges to a valid default (e.g., 0).
+   - This yields a valid mapping (a, b).
+   - Note: Each a_i and b_i must be a single destination; do not split an edge’s weight across multiple destinations.
+5) Simulate the resulting (a, b) for L weeks to obtain actual counts t (O(L)):
+   - x = 0
+   - repeat week = 0..L−1:
+     - t[x]++
+     - if week == L − 1: break
+     - if (t[x] is odd) x = a[x]; else x = b[x]
+6) Evaluate E = sum_i |t_i − T_i|.
+7) Refinement:
+   - Replace cnt with the simulated t and rebuild mapping via steps 2–5 (trying the same small set of last candidates).
+   - Keep the best mapping by E.
+   - Cap total iterations to keep runtime low (e.g., ≤ 3 total simulate+rebuild passes).
+8) Always ensure a valid mapping is output even if optimization is skipped.
+
+Safety fallback (guaranteed-valid, O(N)):
+- If input parsing fails or unforeseen errors occur, output:
+  - a_i = b_i = (i + 1) % N for all i.
+- This ensures legality and a roughly uniform visitation cycle.
+
+Edge cases and pitfalls:
+- Use long long for counts and E to avoid overflow.
+- Ensure exactly N output lines; every i has both a_i and b_i set and in [0..N−1].
+- Remember:
+  - Total transitions = L − 1; model this by reducing one outgoing transition at a chosen “last” node and removing it from the correct rotor edge based on cnt[u] parity.
+  - The week-1 adjustment: R[0] = max(0, T[0] − 1), others R[v] = T[v].
+- Deterministic behavior: avoid randomization or fix a seed; tie-break consistently.
+- No extra prints or blank lines outside those N lines.
+
+Output requirement (critical for this chat environment):
+- Your response must ONLY contain the final C++17 solution code, wrapped in a single ```cpp ... ``` block. No explanation, comments, or additional text before or after the code block.

@@ -1,0 +1,84 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. The execution time and memory limit are also stated in the statement so be aware of the complexity of the program. Please wrap the code in ```cpp and ``` so that it is properly formatted. Your response should ONLY contain the C++ code, with no additional explanation or text.
+
+Task-specific details for AtCoder Heuristic Contest 026 "Boxes in Stacks" (AHC026) that you must follow to avoid Wrong Answer:
+
+- Problem summary:
+  - There are n boxes labeled 1..n, divided into m stacks. m divides n; each stack initially has exactly n/m boxes listed from bottom to top.
+  - You must output up to 5000 operations to remove all boxes in increasing order (1, 2, ..., n).
+  - Operation 1 (move): Choose any box v that has not been carried out yet. Let v be at index j (0-based from the bottom) in its source stack s with current height h (so the stack is b_{s,0},...,b_{s,h-1} and b_{s,j}=v). Move the contiguous block [j..h-1] to the top of another stack t (t != s), preserving order. Energy cost is (h - j) + 1. If t == s, this is an illegal/no-op and must not be output.
+  - Operation 2 (carry): If the smallest remaining box is v and it is at the top of some stack, you may carry it out (remove it). Cost 0.
+
+- Input format (from stdin):
+  - First line: n m
+  - Next m lines: each has n/m integers b_{i,0} ... b_{i,n/m-1}, listed bottom to top for stack i (1-based in the statement; read into 0-based arrays).
+
+- Output format (to stdout):
+  - Print each operation on its own line as two integers: v i
+    - For Operation 1 (move): print "v destStackIndex", where destStackIndex is 1..m.
+    - For Operation 2 (carry): print "v 0".
+  - Do NOT print the number of operations first. Do NOT print any extra text, spaces, or blank lines before/after.
+
+- Strict legality requirements (must satisfy to avoid WA):
+  - Never exceed 5000 total operations in a single test case. In official tests n=200, m=10; the algorithm below uses ≤ 2n operations (≤ 400).
+  - Process boxes in strictly increasing order v = 1..n. Never perform Operation 2 on a box that is not the smallest remaining, or is not at the top of some stack.
+  - Never perform Operation 1 on a box that has already been carried out.
+  - For Operation 1, the destination stack index must be in [1..m] and must be different from the source stack.
+  - Avoid no-op moves (moving to the same stack).
+  - Maintain the stacks’ bottom-to-top order at all times.
+
+- State tracking (essential to avoid subtle bugs):
+  - Maintain arrays:
+    - posStack[v]: current stack index (0..m-1), or -1 if already carried.
+    - posIndex[v]: index within its current stack (0 = bottom), or -1 if carried.
+  - Maintain stacks as vectors<int> stacks[m], each storing bottom-to-top.
+  - When you perform Operation 1 moving a block starting at some box u:
+    - Let s = posStack[u], j = posIndex[u], and h = stacks[s].size().
+    - Extract the block stacks[s][j..h-1] (inclusive) and append it to stacks[t] in order.
+    - Update posStack[] and posIndex[] for all moved boxes to (t, destStart + offset), where destStart is the size of stacks[t] before appending and offset runs from 0 to (h - j - 1).
+    - IMPORTANT off-by-one: After moving [j..h-1], the source stack must become size j (i.e., stacks[s].resize(j)). Do NOT resize to j-1.
+    - Boxes remaining below index j in the source stack keep their posIndex[] unchanged.
+    - Record the operation as (u, t+1) because output stacks are 1-based.
+  - When you perform Operation 2 (carry v):
+    - Verify v is at top: let s = posStack[v], check s != -1 and stacks[s].back() == v.
+    - Pop from stacks[s], set posStack[v] = posIndex[v] = -1.
+    - Record (v, 0).
+
+- Algorithm (simple and safe, ≤ 2n operations):
+  - For v from 1 to n:
+    - If posStack[v] == -1, continue (already carried).
+    - While v is not at the top of its stack:
+      - Let s = posStack[v], j = posIndex[v], h = stacks[s].size().
+      - There must be at least one box above v (j + 1 < h). Let u = stacks[s][j + 1] be the element directly above v.
+      - Choose a destination stack t != s using the heuristic below.
+      - Perform Operation 1 to move the block starting at u (i.e., stacks[s][j+1..h-1]) to stack t in one move.
+      - After this move, v must become the top of stack s (its posIndex remains j, and stacks[s].size() becomes j+1 so stacks[s].back() == v).
+    - Perform Operation 2 to carry v.
+  - This guarantees legality (v is always the smallest remaining and carried only when on top) and keeps total operations ≤ 2n.
+
+- Destination stack selection heuristic (to reduce future interference; any legal choice is fine for correctness):
+  - Use a small window W (e.g., 12–20). For current target v, among all t != s, choose the stack that minimizes:
+    1) the count of elements ≤ v + W currently in stacks[t],
+    2) then the current height of stacks[t],
+    3) then the index t.
+  - If no better choice is found (should not happen), fall back to the smallest t != s.
+
+- Performance and robustness:
+  - Use O(1) amortized updates by pushing/popping vectors; avoid quadratic reindexing.
+  - Fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+  - No debug prints. Only output the operation list.
+  - Handle corner cases robustly:
+    - Ensure t != s before any move.
+    - Ensure u (the block-start for Operation 1) is uncarried (it will be if posStack[v] != -1 and j+1 < h).
+    - If m == 1, only Operation 2 is ever possible; carry v only if it is already on top, otherwise you cannot finish (official tests have m=10, but code must not perform illegal moves when m==1).
+
+- Final deliverable:
+  - Provide a single self-contained C++17 program that:
+    - Reads input as specified (n, m, then m lines each with n/m integers bottom-to-top),
+    - Computes a legal sequence of operations abiding by all rules above,
+    - Outputs only the operations (no extra lines or explanations),
+    - Wraps the code between ```cpp and ``` with nothing else in the response.
+
+Notes from prior failures to avoid:
+  - Do not “break” early if a move somehow fails; instead, structure logic so that after moving the block above v in one operation, v must become the top (this is guaranteed if you always pick u = the element directly above v). Then immediately perform the carry of v.
+  - Always update posStack/posIndex for every moved box during Operation 1; leaving any stale indices can cause illegal carries later.
+  - Ensure every Operation 1’s destination is 1..m and never equal to the source stack.

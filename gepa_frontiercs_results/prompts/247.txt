@@ -1,0 +1,155 @@
+You are a competitive programmer. Implement a C++17 program that transforms one integer sequence A into another sequence B using the binary operation T(i, j) (1 ≤ i < j ≤ N):
+
+Operation T(i, j):
+- Replace A_i with the old value of A_j minus 1.
+- Replace A_j with the old value of A_i plus 1.
+- All other positions remain unchanged in that operation.
+
+Task:
+- Determine if A can be transformed into B.
+- If impossible, print:
+  - No
+- If possible, print:
+  - Yes
+  - M (the exact number of operations)
+  - Then M lines, each with "i j" (1 ≤ i < j ≤ N), representing one operation T(i, j).
+- Print nothing else. No debug prints, no comments, no extra whitespace.
+
+Input (from standard input):
+- Line 1: N (2 ≤ N ≤ 100)
+- Line 2: A1 A2 ... AN (1 ≤ A_i ≤ 100)
+- Line 3: B1 B2 ... BN (1 ≤ B_i ≤ 100)
+
+Feasibility and invariants (must be enforced):
+- The operation T preserves the total sum of the array. Therefore sum(A) must equal sum(B). If not, print No.
+- For N = 2:
+  - Only two arrays are reachable from A: A itself and T(1, 2)(A). Hence feasibility is: B == A or B == T(1, 2)(A). If neither, print No.
+- For N ≥ 3:
+  - sum(A) == sum(B) is sufficient: any A can be transformed into any B with the same sum using a finite sequence of valid operations T(i, j) (i < j). You must still output a valid sequence that actually reaches B.
+
+Indexing and strict validity requirements:
+- Use 1-based indexing throughout.
+- Every printed operation must satisfy 1 ≤ i < j ≤ N. Do not ever record or print an operation with i ≥ j or with indices outside [1..N].
+- NEVER “fix up” the print by skipping invalid operations after writing M. Only record valid operations; M must equal exactly the number of printed pairs.
+- Do not silently ignore an invalid call; instead, design the code so invalid calls cannot occur. Assert preconditions before applying/recording any operation.
+
+Core primitives to implement (and fully trust/encapsulate):
+- Maintain a working array cur (initialized to A) and a vector of operations ops.
+
+- applyT(i, j):
+  - Precondition: 1 ≤ i < j ≤ N.
+  - Let ai = cur[i], aj = cur[j].
+  - Set cur[i] = aj - 1, cur[j] = ai + 1.
+  - Append (i, j) to ops.
+
+- triple-swap to swap the values at positions i and j using a pivot k strictly outside [i, j] (either k < i or k > j). This sequence exactly swaps cur[i] and cur[j] and leaves cur[k] unchanged:
+  - If i < j < k: perform T(i, k), T(j, k), T(i, k).
+  - If k < i < j: perform T(k, i), T(k, j), T(k, i).
+  - Correct pivot choice:
+    - If j < N, use k = N (since k > j).
+    - Else (j == N), use k = 1 (since k < i). This case is valid only if i > 1.
+  - IMPORTANT: Never attempt triple-swap(i, j) with (i, j) = (1, N). There is no pivot strictly outside both ends in that case.
+
+- unit transfer: Move exactly one unit from donor d to receiver r (d ≠ r). The net effect must be cur[d] -= 1 and cur[r] += 1; all other positions unchanged. Realize this using at most 4 operations, with a valid pivot strictly outside the pair:
+  - If r < d (moving a unit leftward):
+    - First applyT(r, d). Now r increased by 1, d increased by 1 relative to their old values but “crossed.”
+    - Then triple-swap(r, d) using a valid pivot strictly outside [r, d] (k = N if d < N, else k = 1 if r > 1).
+    - Net effect from original: cur[r] += 1, cur[d] -= 1; others unchanged.
+  - If r > d (moving a unit rightward):
+    - First triple-swap(d, r) using a valid pivot strictly outside [d, r] (k = N if r < N, else k = 1 if d > 1).
+    - Then applyT(d, r).
+    - Net effect from original: cur[d] -= 1, cur[r] += 1; others unchanged.
+  - Special routing for the extremes (d, r) ∈ {(1, N), (N, 1)}:
+    - There is no valid extreme pivot for triple-swap(1, N). To move one unit between 1 and N, route through an intermediate index m ∈ {2, N-1}:
+      - For moving 1 → N: unit_transfer(1, m), then unit_transfer(m, N).
+      - For moving N → 1: unit_transfer(N, m), then unit_transfer(m, 1).
+    - Each sub-transfer uses the 4-step primitive with a valid pivot. The intermediate m returns to its original value net.
+
+Optimization goal (scored tasks; minimize M):
+- Many judges for this task score based on the number of operations M relative to the (unknown) optimal m0. You should strive to minimize M.
+- Lower bound: Let D = sum_i |A_i - B_i|. Each T modifies exactly two positions and can reduce D by at most a large amount in the best case (it can set one or even both positions directly to the targets). However, unit-transfer moves always reduce D by exactly 2. Therefore D/2 is a fundamental lower bound on M (you cannot do better than D/2 operations).
+- Your construction should aim to get very close to this bound. A naive plan that implements every unit transfer with 4 ops leads to about 2D operations, which is too large and will score poorly (often 0). You must do better.
+
+High-impact greedy improvements (to cut M drastically):
+- Perfect 1-step fixes (two birds with one stone):
+  - For any i < j, if cur[i] needs to increase (cur[i] < B[i]) and cur[j] needs to decrease (cur[j] > B[j]), and
+    - cur[j] == B[i] + 1 AND cur[i] + 1 == B[j],
+    - then T(i, j) sets both i and j exactly to their targets in 1 operation. Always prioritize these when available.
+
+- Single-target 1-step fixes:
+  - For any i < j, if cur[i] < B[i] and cur[j] > B[j] and cur[j] == B[i] + 1, then T(i, j) sets i exactly to its target (j moves by +1 and will be corrected later). Similarly, if cur[i] > B[i] and cur[j] < B[j] and cur[i] == B[j] - 1, then T(i, j) sets j exactly to its target.
+  - These 1-step fixes dramatically reduce D and M. Repeatedly scan and apply them until none remain.
+
+- Max-gain pair choice:
+  - When no 1-step fix exists, evaluate all i < j and compute the net reduction in D if T(i, j) is applied:
+    - Let x = cur[i], y = cur[j], and targets bi = B[i], bj = B[j].
+    - After T(i, j), we get x' = y - 1, y' = x + 1.
+    - The D-change is: (|x - bi| + |y - bj|) - (|x' - bi| + |y' - bj|).
+  - Pick the pair (i, j) that maximizes D reduction (break ties arbitrarily, e.g., smaller i then j). Apply T(i, j). Repeat this best-improvement step until D cannot be reduced by any T.
+
+- If the best achievable reduction from any T(i, j) is ≤ 0 but cur != B:
+  - Fall back to guaranteed-progress unit transfers (described above) to reduce D by exactly 2 per “unit” step. This ensures termination and correctness.
+  - After each fallback unit transfer, resume the greedy phases above (perfect 1-step fixes, then max-gain T pair).
+
+Algorithm outline (robust, terminating, efficient):
+1) Read N, A, B. Compute long long sums sumA and sumB.
+2) If sumA != sumB: print "No" and exit.
+3) If N == 2:
+   - If A == B: print "Yes", 0 and exit.
+   - Else compute C = T(1, 2)(A). If C == B: print "Yes", 1, then "1 2", and exit.
+   - Else print "No" and exit.
+4) If N ≥ 3:
+   - Initialize cur = A and ops = {}.
+   - Implement applyT(i, j), triple_swap(i, j) (with pivot choice strictly outside [i, j], never for (1, N)), and unit_transfer(d, r) (with mandatory routing for the extreme pair).
+   - Main loop:
+     - While cur != B:
+       - Phase A (perfect 1-step fixes): repeatedly scan all i < j for any pair with
+         - (cur[i] < B[i] and cur[j] > B[j] and cur[j] == B[i] + 1 and cur[i] + 1 == B[j]) OR
+         - (cur[i] > B[i] and cur[j] < B[j] and cur[i] == B[j] - 1 and cur[j] + 1 == B[i]);
+         when found, applyT(i, j) and restart the scan from the beginning.
+       - If cur == B: break.
+       - Phase B (single-target 1-step fixes): repeatedly scan all i < j for any pair with
+         - (cur[i] < B[i] and cur[j] > B[j] and cur[j] == B[i] + 1) OR
+         - (cur[i] > B[i] and cur[j] < B[j] and cur[i] == B[j] - 1);
+         when found, applyT(i, j) and restart the scan from the beginning.
+       - If cur == B: break.
+       - Phase C (best-improvement T):
+         - Evaluate all valid pairs i < j, compute D-gain from T(i, j), and choose the pair with the maximum gain. If max gain > 0, apply it and continue the outer while loop.
+       - Phase D (guaranteed progress fallback):
+         - Build donors and receivers:
+           - donors: indices d with cur[d] > B[d] (surplus amount = cur[d] - B[d]).
+           - receivers: indices r with cur[r] < B[r] (deficit amount = B[r] - cur[r]).
+         - Select any donor d and any receiver r (first in each list works). If d == r, skip.
+           - If r < d and cur[d] - cur[r] == 2 and the 1-step leftward condition holds, prefer a direct T(r, d).
+           - Otherwise perform unit_transfer(d, r). This always moves exactly one unit in the correct direction and reduces D by 2.
+     - The loop terminates because each iteration reduces D strictly (by ≥ 1 in A–C and by 2 in D), and D is finite and nonnegative.
+   - After constructing ops, verify correctness with a fresh simulation:
+     - Start from a copy of A and reapply every recorded (i, j) (always assert 1 ≤ i < j ≤ N).
+     - If the final result does not equal B or any operation violates 1 ≤ i < j ≤ N:
+       - Fallback: clear ops, set cur = A, and rebuild using ONLY Phase D unit_transfer for every required unit, always picking some donor and receiver until cur == B (preserving all index/pivot constraints).
+       - Simulate again from A. If still mismatched or any invalid operation would be needed (should not happen if primitives are correct), print "No" and exit.
+
+Performance and scoring considerations:
+- N ≤ 100, values ≤ 100. The greedy phases (A–C) are O(N^2) per step and typically converge in a few thousands of steps at most. The fallback unit transfers are bounded by D/2 ≤ 9900, each costing at most 4 operations; but the greedy phases should reduce reliance on fallback heavily.
+- Aim for operation counts close to D/2. The best-improvement phase allows single T’s that often fix one (or even both) indices directly, drastically reducing M compared to pure unit-transfer routing.
+- If ops.size() grows suspiciously large (e.g., > 200000), you likely have a bug or a cycle. Abort the current build, switch to robust fallback (Phase D only), and verify by simulation.
+
+Pitfalls to avoid (these have caused wrong answers in prior attempts):
+- Always maintain i < j in every printed T(i, j). Never call or record applyT with i ≥ j. Enforce with asserts.
+- In triple_swap, the pivot must be strictly outside [i, j] (either k < i or k > j). Never pick a pivot between i and j. Never attempt triple-swap(1, N); handle (1, N) only by routing through an intermediate index using two unit_transfer calls.
+- The 1-step cheap move for leftward transfer is valid only when the receiver’s index is smaller (i < j) and cur[j] - cur[i] == 2; do not mirror it for i > j.
+- Use 1-based indexing consistently and bounds-check all indices.
+- Do not print debug output; adhere strictly to the required format.
+- Do not write M and then print fewer/more operations. Only record valid operations; print all recorded operations verbatim.
+- Always re-simulate from A before printing to ensure correctness: final cur must equal B.
+
+Output format (must be exact):
+- If impossible: print a single line: No
+- If possible:
+  Yes
+  M
+  i1 j1
+  i2 j2
+  ...
+  iM jM
+(with newlines as line separators; no extra spaces or lines)

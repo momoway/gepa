@@ -1,0 +1,124 @@
+You are a competitive programmer implementing a robust, legal solver for an AtCoder Heuristic Contest–style problem (AHC039 “Fish”-like). Your program must always output a valid axis-aligned simple polygon under strict constraints. If anything at all goes wrong, immediately fall back to a tiny valid rectangle [0,1] × [0,1].
+
+Absolute priorities:
+- Legality and I/O correctness over score.
+- Deterministic behavior (no randomness).
+- No extra output beyond the required polygon format.
+
+Task and input (single test per run):
+- Read strictly from stdin:
+  - First line: integer N.
+  - Next N lines: mackerels (xi, yi), 0 ≤ xi, yi ≤ 100000, all distinct.
+  - Next N lines: sardines (xi, yi), 0 ≤ xi, yi ≤ 100000, all distinct and distinct from mackerels.
+  - Total points: 2N.
+- Input reading must be strict: attempt to read exactly 1 + 2N lines of numbers; if any read fails (including incomplete data), immediately output the fallback small rectangle and exit.
+- Do not attempt to parse any “story” or problem statement text; only numbers appear in the actual input when judged.
+- Typical N is 5000 (so total 10000 points), but do not assume; rely only on the format above.
+
+Output:
+- Exactly one polygon:
+  - First line: m (number of vertices), 4 ≤ m ≤ 1000. We will always use m = 4 (a rectangle).
+  - Next m lines: ai bi (integers), the vertices in clockwise or counterclockwise order.
+- No extra prints, no debug logs, no additional whitespace or blank lines beyond these m+1 lines.
+
+Polygon constraints to satisfy:
+- Orthogonal (axis-aligned) edges only.
+- Simple: no self-intersections; non-adjacent edges must not touch; adjacent edges meet only at endpoints.
+- Integer vertices with 0 ≤ x, y ≤ 100000.
+- Perimeter (closed polygon) ≤ 400000.
+- All vertices must be distinct.
+- Points on edges are considered inside.
+
+Goal (for scoring context only; do not print scores):
+- Maximize a - b where a = # of mackerels inside, b = # of sardines inside.
+- Score per case = max(0, a - b + 1). There are 150 cases; illegal output or runtime issues in any case make the total score 0.
+
+Required simple, reliable approach (binning + 2D max-subarray rectangle):
+1) Read N, then read exactly 2N points:
+   - First N points are mackerels (+1 weight).
+   - Next N points are sardines (-1 weight).
+   - If any read fails, immediately output the fallback [0,1] × [0,1] rectangle and exit.
+   - Clamp any input coordinates to [0, 100000] (safety).
+
+2) Build a coarse 2D grid over [0, 100000] × [0, 100000]:
+   - Choose Kx and Ky in [50..120]; use Kx = Ky = 96 for a good balance.
+   - Construct strictly increasing integer edge arrays Xedges[0..Kx], Yedges[0..Ky] that partition [0,100000] exactly with step sizes ≥ 1 using quotient-remainder splitting (guarantees strict monotonicity without any post hoc clamping that could break it):
+     - Let baseX = 100000 / Kx, remX = 100000 % Kx.
+       - Xedges[0] = 0.
+       - For i in 0..Kx-1:
+         - inc = baseX + (i < remX ? 1 : 0)  // each inc ≥ 1
+         - Xedges[i+1] = Xedges[i] + inc
+       - This yields Xedges[Kx] = 100000 and Xedges strictly increasing.
+     - Do the same for Yedges with baseY = 100000 / Ky, remY = 100000 % Ky.
+   - Bins are the Kx × Ky closed rectangles [Xedges[ix], Xedges[ix+1]] × [Yedges[iy], Yedges[iy+1]].
+     - Note: For bin indexing we’ll map each point deterministically to exactly one bin as defined below.
+
+3) Map each point to a bin and accumulate weights:
+   - For a coordinate val and edges E of size K+1, compute:
+     - idx = upper_bound(E.begin(), E.end(), val) - E.begin() - 1;
+     - clamp idx to [0..K-1] (this correctly maps val = 100000 into the last bin).
+   - Maintain a 2D weight array w[Kx][Ky] (int), initialized to 0 (implement as a flat vector<int> of size Kx*Ky).
+   - For i in [0..2N-1]:
+     - weight = +1 if i < N else -1.
+     - Compute (ix, iy) and do w[ix][iy] += weight.
+
+4) Find the best bin-aligned rectangle via 2D maximum subarray:
+   - For each L in [0..Kx-1]:
+     - Zero a 1D array acc[0..Ky-1] (long long).
+     - For each R in [L..Kx-1]:
+       - For y in [0..Ky-1], acc[y] += w[R][y].
+       - Run Kadane’s algorithm on acc to find best contiguous y-interval [B..T] (inclusive):
+         - Track curSum, curStart, bestSumY, bestB, bestT.
+         - Correctly handle all-negative arrays: the standard Kadane variant that updates bestSumY whenever curSum becomes larger (including when curSum is just acc[y] after reset) suffices to pick the maximum single element if all negative.
+       - Track the global best (L,R,B,T) by total sum (long long).
+       - Tiebreakers for determinism on equal sums:
+         1) Prefer the smaller perimeter estimate estPerim = 2*((Xedges[R+1]-Xedges[L]) + (Yedges[T+1]-Yedges[B])).
+         2) If still tied, prefer lexicographically smaller (x1,y1,x2,y2) = (Xedges[L],Yedges[B],Xedges[R+1],Yedges[T+1]).
+
+5) Convert the best bin-rectangle to actual coordinates and validate:
+   - If bestSum ≤ 0, or indices invalid/out of range: fallback to [0,1] × [0,1].
+   - Otherwise set:
+     - x1 = Xedges[L], x2 = Xedges[R+1];
+     - y1 = Yedges[B], y2 = Yedges[T+1].
+   - Validate:
+     - 0 ≤ x1 < x2 ≤ 100000 and 0 ≤ y1 < y2 ≤ 100000.
+     - Perimeter perim = 2*((x2 - x1) + (y2 - y1)) must be ≤ 400000 (this will always hold because (x2-x1) ≤ 100000 and (y2-y1) ≤ 100000; keep the check regardless).
+   - If perim > 400000 (extremely unlikely), attempt a deterministic shrink instead of immediate fallback:
+     - While perim > 400000 and ((x2 - x1) > 1 || (y2 - y1) > 1):
+       - Prefer shrinking the longer side first using the nearest grid edges:
+         - If (x2 - x1) ≥ (y2 - y1), try moving the right side inward if R > L (R--, x2 = Xedges[R+1]); otherwise try moving the left side inward if L+1 ≤ R (L++, x1 = Xedges[L]).
+         - Else, try moving the top side inward if T > B (T--, y2 = Yedges[T+1]); otherwise try moving the bottom side inward if B+1 ≤ T (B++, y1 = Yedges[B]).
+       - Recompute perim; if at any point coordinates become invalid (non-increasing or out of bounds), fallback.
+     - If you cannot shrink further to meet the perimeter constraint without degeneracy, fallback to [0,1] × [0,1].
+   - Final safety checks before printing:
+     - Coordinates remain integers in [0,100000].
+     - x1 < x2 and y1 < y2.
+     - perim ≤ 400000.
+     - Four vertices will be distinct.
+
+6) Output exactly the 4 rectangle vertices in order (CW or CCW):
+   - (x1, y1)
+   - (x2, y1)
+   - (x2, y2)
+   - (x1, y2)
+
+Implementation guardrails:
+- Language: C++17. Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Use long long for all sums and perimeter calculations.
+- Arrays:
+  - w as vector<int> of size Kx*Ky.
+  - acc as vector<long long> size Ky.
+  - Xedges, Yedges as vector<int> size K+1 built with the quotient-remainder method described above (no clamping that could break strict monotonicity).
+- Deterministic behavior only; no randomness; no time-based seeds.
+- Never print anything besides the required m and vertex lines. No extra spaces, no logs, no blank trailing lines.
+- If any invariant is violated or any unexpected state occurs, immediately print the fallback tiny rectangle and exit:
+  - m=4
+  - (0,0), (1,0), (1,1), (0,1)
+
+Deliverable:
+- Output ONLY a single complete C++17 program wrapped in ```cpp ... ``` that:
+  - Reads N and exactly 2N points from stdin (strictly; fallback on any failure).
+  - Builds the grid via the quotient-remainder edge construction (strictly increasing edges, Xedges[Kx] = Yedges[Ky] = 100000).
+  - Bins points (+1/-1), runs the 2D max-subarray to select a rectangle with deterministic tie-breaking.
+  - Converts to coordinates, validates constraints including perimeter ≤ 400000 (with deterministic shrink if needed).
+  - Prints exactly 4 vertices forming a legal axis-aligned rectangle (or the fallback).

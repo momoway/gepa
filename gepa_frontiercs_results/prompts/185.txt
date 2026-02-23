@@ -1,0 +1,50 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. Always adhere to the stated execution time and memory limits, and design your algorithm with the worst-case input sizes in mind. Your response must be ONLY the C++ code, wrapped in a single ```cpp ... ``` block, with no additional text or explanation.
+
+Task: Maximum Clique Challenge (Important details and constraints)
+- Input:
+  - First line: two integers N M
+    - 2 ≤ N ≤ 1,000 (vertices labeled 1..N)
+    - 1 ≤ M ≤ 500,000
+  - Next M lines: edges u v (undirected, 1 ≤ u ≠ v ≤ N)
+  - Multiple edges between the same pair may appear; they imply the same constraint and should be treated as a single edge.
+- Output:
+  - Exactly N lines. Line i contains a single integer x_i ∈ {0,1}
+    - x_i = 1 if vertex i is selected into the clique; otherwise 0.
+  - For every pair u ≠ v with x_u = x_v = 1, the edge {u, v} must exist in E.
+- Scoring:
+  - Heuristic scoring is described, but in practice the judge may mark solutions as Wrong Answer if the returned clique is not maximum (even if it is valid). Therefore, implement an exact maximum clique solver to guarantee acceptance.
+- Limits:
+  - Time Limit: 2.0s
+  - Memory Limit: 512MB
+
+Implementation requirements:
+- Implement an exact maximum clique algorithm using a high-performance branch-and-bound with bitset acceleration and strong pruning:
+  - Represent adjacency using custom 64-bit bitsets: for N vertices, use W = (N+63)/64 words per bitset.
+  - Use fast builtins (__builtin_popcountll, __builtin_ctzll) for performance.
+  - Deduplicate edges and ignore self-loops when building the graph.
+- Use an advanced exact algorithm variant (Tomita-style/MCQ/MCR) with:
+  1) Vertex reordering by non-increasing degree and/or degeneracy ordering to reduce branching; remap adjacency to this order and keep a mapping back to original indices for output.
+  2) Strong upper bounds via greedy sequential coloring on the current candidate set P:
+     - While P is non-empty, construct color classes: repeatedly pick a vertex from the remaining set and remove it and its neighbors from the temporary pool to form one color. Assign each vertex a color number (the index of its color class).
+     - This yields an upper bound: if |R| + maxColor ≤ best, prune.
+     - Produce an ordered list of candidates and their color bounds; iterate vertices in decreasing color number (i.e., process tighter-bound vertices later).
+  3) Optional pivoting: choose a pivot u (typically maximizing |P ∩ N(u)|) and branch only on vertices in P \ N(u) to reduce the number of branches.
+  4) Branch-and-bound recursion:
+     - If P is empty, update best (save the current clique R if larger).
+     - Otherwise, use the coloring order and bound to prune: if |R| + colorBound[i] ≤ best, stop exploring earlier vertices.
+     - For each selected vertex v (in decreasing color order), recurse on P ∩ N(v), then remove v from P and continue.
+  5) Preseed best with a fast greedy heuristic clique (e.g., iteratively add a vertex with the highest degree within the current candidate set) to tighten the lower bound early.
+- Optimize memory and recursion:
+  - Avoid dynamic allocations inside tight loops; preallocate working arrays (orders, bounds, stacks) per recursion depth.
+  - Copying bitsets should be O(W); keep them on the stack or in preallocated vectors where possible.
+  - Use fast IO: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Edge cases and quick exits:
+  - If the graph is complete, output all 1s.
+  - If N is small, a straightforward exact search still applies.
+- Output:
+  - After computing the maximum clique in the reordered index space, map back to original indices and print exactly N lines with 0/1.
+  - Do not print any extra spaces, debug output, or blank lines beyond the N required lines.
+
+Notes:
+- Although the problem statement describes heuristic scoring, prior judge feedback indicates that returning a non-maximum (even if valid) clique may be judged as Wrong Answer. Therefore, prioritize an exact solver with strong pruning (bitset + greedy coloring + pivoting).
+- Keep the implementation self-contained and portable; do not rely on nonstandard extensions beyond typical GNU++17 support.

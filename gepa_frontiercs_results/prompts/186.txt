@@ -1,0 +1,69 @@
+You are a competitive programmer. You will be given a problem statement. Implement an efficient solution in C++ that respects the stated execution time and memory limits. Wrap the code in ```cpp and ``` so it is properly formatted. Your response must ONLY contain the C++ code, with no extra explanation or text.
+
+Task (Graph Coloring Challenge):
+- You are given an undirected graph G = (V, E) with N vertices (2 ≤ N ≤ 500) and M edges (1 ≤ M ≤ N*(N-1)/2).
+- Each vertex must be assigned a positive integer color.
+- A coloring is valid iff for every edge {u, v} in E, color[u] ≠ color[v].
+- Objective: minimize the number of colors used (i.e., minimize C = max_i color[i]).
+- Scoring (for judge info only): Score = (C* / C) * 100, where C* is the hidden optimal chromatic number.
+
+Input format:
+- First line: N M
+- Next M lines: u v (1-based vertex indices), u ≠ v.
+- Multiple edges may appear; treat them as a single constraint (deduplicate edges). Self-loops should be ignored if they appear.
+
+Output format:
+- Exactly N lines.
+- Line i: a single integer color[i] (≥ 1).
+
+Constraints:
+- N ≤ 500, M ≤ N*(N-1)/2.
+- Time limit: 2.0 seconds.
+- Memory limit: 512 MB.
+
+Requirements and guidance for a high-quality heuristic (critical to get a better score):
+- Use robust heuristics known to work well for vertex coloring under tight time:
+  1) Initial colorings:
+     - Implement DSATUR (Brélaz) with tie-breaking by:
+       - higher saturation degree first,
+       - then higher degree,
+       - then a random tiebreaker.
+     - Maintain for each vertex a fast structure (bitset-like) of neighbor-used colors to compute saturation efficiently. Since N ≤ 500, a small fixed-size bitset (e.g., 512) is fine, or use a compact dynamic bitset (vector<uint64_t>).
+     - Perform multiple randomized DSATUR restarts within time (randomize tie-breaking keys) and keep the best solution found so far.
+     - In addition to DSATUR, also try at least one alternative initial heuristic and keep the best:
+       - RLF (Recursive Largest First), or
+       - Greedy on multiple vertex orderings: Largest Degree First, Smallest-Last ordering, random shuffle. Use color reuse with first-fit.
+  2) Post-processing improvements (very important):
+     - Greedy “move-down” pass: iterate vertices in descending color order and reassign to the smallest available color that keeps validity.
+     - Color class elimination loop: attempt to remove the current maximum color C by trying to recolor its vertices into colors < C. Repeat while successful.
+     - Kempe chain interchanges (key improvement):
+       - For each vertex v of the current maximum color C and for each target color t < C:
+         - If t is not present on neighbors of v, recolor v to t.
+         - Otherwise, attempt a Kempe chain swap: pick a neighbor u of v with color t, compute the connected component in the subgraph induced by colors {t, C} that contains u; if v is not in that component, swap colors t and C on that component, then recolor v to t.
+       - Try multiple target colors t, prefer those with fewer conflicts in v’s neighborhood.
+       - Repeat across vertices in color class C; if every vertex moves, C is eliminated.
+     - Iterated local search:
+       - Perform several rounds: randomize processing orders, alternate greedy move-down and Kempe chain attempts, and accept improving moves that reduce C or keep C but reduce color usage footprint.
+     - Optional (time-permitting, with cutoff guards): A quick feasibility attempt for k = C-1 using a fast local search (e.g., TabuCol-style conflict-minimization) or a very shallow DSATUR-based backtracking on the induced subproblem; abort if time is tight or progress stalls.
+- Data structures and performance:
+  - Deduplicate edges (use adjacency bitset/matrix to avoid duplicates) and store adjacency as both:
+    - adjacency list (vector<vector<int>>) for iteration,
+    - and a compact adjacency bitset per vertex (e.g., bitset<512> or vector<uint64_t>) for O(1)/O(64) conflict tests and Kempe component BFS checks.
+  - Degrees: precompute deg[i].
+  - Ensure all operations are O(M) to O(N^2) per major pass. With N ≤ 500, bitset operations are fast.
+  - Use high-resolution steady_clock to enforce a strict time budget. Leave a safety margin (~50–100 ms) before the 2.0s limit.
+- Correctness and robustness:
+  - Always maintain/track a valid coloring as the incumbent. If an aggressive move breaks validity, revert.
+  - Verify final coloring before output (optional assert or fallback).
+  - Colors must be 1-indexed (≥ 1). Output exactly N lines.
+
+Implementation details:
+- Use fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).
+- Seed RNG with high-resolution clock (mt19937).
+- Keep the best solution across all attempts and output it.
+- Avoid global static limits that could invalidate correctness; if using fixed-size bitsets, ensure they cover N and possible colors (≤ N).
+- Return immediately on EOF-safe read failure.
+
+Remember:
+- Only output the C++ code, wrapped in ```cpp and ``` blocks.
+- No extra text.

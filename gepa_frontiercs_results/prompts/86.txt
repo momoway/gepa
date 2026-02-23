@@ -1,0 +1,99 @@
+You are a competitive programming assistant tasked with writing a C++17 solution for an interactive Codeforces-style problem “Hidden Tree” that uses median-of-three queries on trees. Implement a robust, query-efficient solver that strictly follows all of the following rules, properties, and algorithmic steps. The solution must compile under C++17 and obey the exact I/O protocol.
+
+Output and formatting:
+- Your response must ONLY contain the C++ code, wrapped in ```cpp and ``` with no extra text, explanations, or comments.
+- Never print any debugging info or extra whitespace/lines at any time.
+- After printing each query or the final answer, flush immediately (cout.flush()).
+
+Interactive protocol (critical):
+- Read the initial input exactly as specified: a single integer n (3 ≤ n ≤ 1000) on the first line.
+- To issue a query, print exactly: “0 a b c” (three integers must be pairwise distinct), then flush. Immediately read the single integer reply.
+- After determining all edges, print exactly one line: “1 u1 v1 u2 v2 ... u(n-1) v(n-1)”, flush, and exit immediately (return 0). Do not print anything else and do not read anything further.
+- Absolutely never block waiting for input you didn’t request. After each query line, immediately read exactly one integer reply. After the final answer line, exit without reading further.
+
+Query constraints and safety:
+- Hard limit: at most 20,000 queries. Target ≤ 18,000 worst case for n = 1000.
+- Critical distinctness rule: Every printed query must have three pairwise distinct integers. Issuing a query with any duplicate causes immediate Wrong Answer.
+- Implement a safe median wrapper:
+  - If any two of (x, y, z) are equal, DO NOT print a query. Return the logically correct median deterministically:
+    - median(x, x, y) = x
+    - median(x, y, x) = x
+    - median(y, x, x) = x
+    - median(x, x, x) = x
+  - Only if all three are distinct: print the query, flush, read reply, and return it.
+- Maintain a query counter and increment it only when a real query is printed (i.e., when all three are distinct and not served from cache). Use this counter for a budget guard (see below).
+
+Caching of distinct triples:
+- Cache results for distinct triples to avoid duplicated queries. Use a canonical, order-independent key:
+  - Sort (a, b, c) ascending.
+  - Pack into a 64-bit integer with ≥ 10 bits per node (n ≤ 1000). Use 21 bits per field:
+    key = (uint64_t)a << 42 | (uint64_t)b << 21 | (uint64_t)c.
+- Do NOT cache non-distinct triples.
+- Reserve the unordered_map used for caching to reduce overhead (e.g., reserve around 2^19 or more).
+
+Median properties to use (must be implemented correctly):
+- Minimizer definition: The interactor returns the unique node minimizing the sum of distances to the three queried nodes (the tree median).
+- Path membership: For fixed endpoints a and b, x lies on the simple path a–b iff median(x, a, b) = x.
+- Ordering along path a–b: For u, v on path a–b, u precedes v from a toward b iff median(u, v, a) = u.
+- LCA with anchor a: For any t on the backbone path a–b and nodes x, y with median(x, a, b) = median(y, a, b) = t, define LCA_a(x, y) := median(x, y, a):
+  - If x and y are in different child-subtrees attached to t, then LCA_a(x, y) = t.
+  - If in the same child-subtree of t, LCA_a(x, y) is their join node strictly below t.
+
+High-level reconstruction strategy with strict query budgeting:
+1) Anchors:
+   - Read n. Choose a = 1 and b = 2 as anchors. Do NOT spend extra queries to search for “better” endpoints.
+
+2) Project nodes onto the backbone path P between a and b:
+   - For each v in [1..n], compute r = median(v, a, b) using the safe wrapper.
+     - If r == v, then v lies on path a–b; add v to P.
+     - Otherwise, v is off-path; its projection is t = r. Add v to bucket S_t (grouped by t).
+   - This uses exactly n safe calls. For v = a or v = b, the safe wrapper will return without printing a query.
+
+3) Sort nodes on P along the direction from a to b:
+   - Only sort P \ {a, b} using comparator u < v iff median(u, v, a) = u.
+   - Do NOT compare against a or b in the comparator; only compare interior nodes.
+   - Use the safe median wrapper (with caching) in the comparator. The canonical triple cache drastically reduces repeated comparisons reused by std::sort.
+   - Sorting cost: O(|P| log |P|) median calls in the worst case; with caching this stays well under 10,000 when |P| ≤ 1000.
+   - Build the full path order as [a] + sorted interior + [b].
+
+4) Add edges for the backbone: connect consecutive nodes in the sorted path (exactly the edges along a–b).
+
+5) Reconstruct side subtrees under each backbone node t ∈ P using median(., ., a) as an LCA oracle rooted at a:
+   - For each t, consider the bucket S_t = {x ∉ P | median(x, a, b) = t}. Each S_t is a disjoint forest attached to t.
+   - Partition S_t into child-subtrees of t and recursively build each:
+     - While S_t is not empty, select a deterministic pivot s ∈ S_t using a balanced-split heuristic with a strict query budget:
+       - If |S_t| < 40: pick any s (e.g., the last element).
+       - Else (balanced selection):
+         - Deterministically select up to K candidate pivots from S_t at evenly spaced indices (e.g., K = min(5, |S_t|)).
+         - For each candidate c, estimate its split-balance by checking against a small sample of up to M nodes from S_t \ {c} (e.g., M = min(9, |S_t|-1)), counting how many x in this sample satisfy median(x, c, a) != t (i.e., x is in the same child-subtree of t as c).
+         - Choose the candidate with a split ratio closest to 0.5.
+       - Query-budget guard (critical): If the global query counter ≥ 18,500, disable sampling (set K = 1, M = 0) and just pick s deterministically (e.g., last element). This prevents exceeding 20,000 queries in worst cases.
+     - With the chosen pivot s, form component W = {x ∈ S_t | median(x, s, a) ≠ t} ∪ {s}. These nodes lie in the same child-subtree of t as s.
+     - Compute c = fold_LCA(W) by initializing c = s and repeatedly c = median(c, x, a) for each x ∈ W (using the safe wrapper). This c is the child of t that roots this component; c ∈ W and c ≠ t.
+       - Robustness guard: If (pathologically) c == t due to degenerate grouping, set c = s (which must be below t) and continue; but with correct grouping this should not occur.
+     - Add edge (t, c) to the answer.
+     - Recurse with parent = c on W \ {c}, using the same partition rule but now with “parent” = c: for any pivot s', nodes x with median(x, s', a) ≠ c are in the same child-subtree under c as s'.
+     - Remove all nodes of W from S_t and continue until S_t is empty.
+   - With safe-median, caching, and the reduced K ≤ 5, M ≤ 9 (plus the budget guard), the total query usage for all side subtrees across all t stays near O(m log m) with small constants, where m = n − |P|. Combined with path sorting and the initial n projections, this stays within ≈ 14k–18k queries for n = 1000, and the budget guard prevents going over 20k.
+
+Implementation details and pitfalls to avoid:
+- Always use the safe median wrapper. Never print a query if any two arguments are equal; immediately return the correct repeated value.
+- Use a strong cache for distinct triples as described. Reserve() the unordered_map to reduce overhead.
+- Maintain and increment a query counter only when a real query is printed (i.e., when all three are distinct and not answered from cache). Use it to trigger the sampling-budget guard in subtree reconstruction.
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr).
+- Maintain a vector of edges and only output the final answer once all edges are determined. Output exactly n − 1 undirected edges and do not duplicate edges.
+- After printing the final “1 ...” line, print a newline, flush, and exit immediately. Do not attempt to read any more input after printing the final answer.
+
+Correctness checks embedded in design (no extra prints):
+- P contains exactly the nodes on path a–b (by path membership).
+- Sorting comparator uses only median(u, v, a) on u, v ∈ P \ {a, b} (order property).
+- For each t, nodes in S_t are partitioned by the test median(x, s, a) != t, which identifies nodes in the same child-subtree of t as s; fold_LCA(W) yields the child root c; recursion under parent=c uses the analogous test median(x, s', a) != c.
+- The final edges are: all consecutive pairs along the backbone a–b, plus exactly one edge from each component root c to its parent in the reconstruction, yielding exactly n − 1 edges.
+
+Non-interactive note:
+- This problem IS interactive; include the full interactive scaffolding and obey all the rules above.
+
+Reliability and budget:
+- Initial projection: n safe calls.
+- Path sorting: ≤ |P| log2 |P| safe calls; typically well below 10,000 due to caching.
+- Subtree reconstruction: O(m log m) with small constants using K ≤ 5, M ≤ 9; plus a hard budget guard at ≥ 18,500 real queries to avoid exceeding 20,000.

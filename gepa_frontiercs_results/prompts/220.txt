@@ -1,0 +1,48 @@
+You are a competitive programmer. You will be given a Codeforces-style constructive/simulation problem called “Playing Around the Table” with the following key details:
+
+- There are n players (2 ≤ n ≤ 100) sitting on a circle; player i’s right neighbor is i+1 (and n’s right neighbor is 1).
+- There are n^2 cards; for each label x in [1..n], there are exactly n cards labeled x in total.
+- Initially, each player holds exactly n cards (multiset; duplicates allowed).
+- One operation consists of each player simultaneously choosing one of their current cards and passing it to the right neighbor.
+- Player i is “solid” if all n of their cards are label i. The goal is to perform at most n^2 − n operations to reach a state where all players are solid.
+- Input: n, then n lines each with n integers (the initial multiset for each player).
+- Output: k (0 ≤ k ≤ n^2 − n), then k lines; in line t, print n integers d1..dn where dj is the label on the card player j passes in operation t. Every printed dj must be a card that player j actually holds at that moment (the judge simulates your sequence).
+- Multiple answers are allowed; you don’t need to minimize k. If already solid initially, k can be 0.
+
+Your job: implement a correct C++ solution that constructs a valid sequence of operations (k ≤ n^2 − n) and prints the actual labels each player passes per operation. The solution must simulate the state and ensure feasibility at each step (i.e., never print a label that the player doesn’t currently have).
+
+Important pitfalls noted from prior failed attempts:
+- Printing k=0 unconditionally is wrong unless the initial state is already fully solid for every player. The judge will simulate and check final multisets.
+- Your sequence must be valid step-by-step: on every operation, for every player, the reported label must exist in that player’s hand at that moment.
+
+Recommended constructive strategy (standard approach that fits within the n^2 − n limit and is easy to implement correctly):
+- Maintain per-player counts of labels (frequency array cnt[player][label]) and the total count of “wrong” cards per player (cards whose label != player index).
+- Iteratively build operations up to a cap of n^2 − n, always simulating transfers.
+
+Scheduling rule per operation (greedy but safe and convergent within the bound):
+1) If all players are solid (every player j has cnt[j][j] == n), stop and output the operations constructed so far.
+2) Otherwise, build one operation line of n choices d1..dn as follows:
+   - For each player j:
+     - If they have any wrong card (i.e., cnt[j][x] > 0 for some x != j), choose one to pass. Prefer the card with the largest clockwise distance to its destination label (break ties arbitrarily). This prioritizes pushing “farthest” wrong cards forward, improving pipeline throughput.
+     - Else (no wrong cards), choose to pass label j (their own label). This keeps the operation valid; we will detect global solidity and stop before this harms the final state.
+3) After choosing the n labels for this operation, simulate the simultaneous pass:
+   - For each player j, decrement cnt[j][dj] and increment cnt[next(j)][dj], where next(j) = j % n + 1.
+4) Repeat.
+
+Why this works and fits the limit:
+- Define the potential as the sum over all cards of their clockwise distance from current owner to their destination owner (label). When passing a wrong card, its distance decreases by 1. When a solid player passes an own-label card (only when they have no wrong cards), it may increase potential on that card, but globally the schedule prioritizes moving farthest wrong cards whenever available. With n players and capacity 1 per player per round, the total number of “useful” moves needed is at most n^2(n−1); the algorithm pipelines these moves and halts as soon as the configuration becomes solid, which empirically and in contest editorials is guaranteed within n(n−1) = n^2 − n rounds under this greedy that always moves a wrong card if available.
+- Crucially, never attempt to print a label a player doesn’t have; always check cnt before choosing.
+
+Implementation details:
+- Use 1-based indexing for players and labels to match problem.
+- Store per-player label counts in a vector<int> of size n+1.
+- A helper to compute clockwise distance from player j to label x is: dist = (x - j + n) % n. Note that dist == 0 means the card is already at its destination.
+- In each operation, for players with wrong cards, iterate labels x != j to find the one with maximum dist (break ties by any rule).
+- Keep a vector<vector<int>> ops to record the chosen labels per operation to print at the end.
+- Before building an operation, check if all players are solid; if so, print ops.size() and the recorded lines and exit.
+- Ensure the loop caps at n^2 − n iterations; with the above rule you should finish earlier; if you hit the cap, assert that all players are solid and print; otherwise, as a fallback, stop early only when solid (do not exceed cap or print invalid sequences).
+
+Output format requirements:
+- Wrap your solution solely in a single C++ code block using ```cpp ... ```.
+- Do not include any extra commentary, explanations, or non-C++ content.
+- Read from stdin, write to stdout. Optimize I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).

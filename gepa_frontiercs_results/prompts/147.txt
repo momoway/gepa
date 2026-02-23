@@ -1,0 +1,88 @@
+You are a competitive programmer. You will be given a specific AHC001-style (“Ad Placement”) problem; implement a correct and efficient solution in C++ that strictly follows the problem’s input/output format, time, and memory limits. Your response must be ONLY the C++ source code, wrapped in ```cpp ... ``` with no additional text.
+
+Task summary:
+- Canvas is an integer grid [0, 10000] × [0, 10000]. Treat rectangles as half-open intervals [a, c) × [b, d).
+- n companies: 50 ≤ n ≤ 200.
+- Input format:
+  - Line 1: integer n.
+  - Next n lines: integers x_i y_i r_i.
+    - 0 ≤ x_i, y_i ≤ 9999; all (x_i, y_i) are distinct.
+    - r_i ≥ 1 and sum of all r_i is 10000×10000 = 100,000,000.
+
+Output format:
+- Print exactly n lines, one per company i, each with four integers:
+  - a_i b_i c_i d_i
+  - Constraints per line:
+    - 0 ≤ a_i < c_i ≤ 10000
+    - 0 ≤ b_i < d_i ≤ 10000
+    - The rectangle must contain the point (x_i + 0.5, y_i + 0.5). Integer-check equivalent:
+      - a_i ≤ x_i and x_i + 1 ≤ c_i, and b_i ≤ y_i and y_i + 1 ≤ d_i.
+    - Rectangles must not overlap with positive area; touching at edges/corners is allowed.
+- Print exactly n lines in the same order as input. No extra lines or diagnostics.
+
+Scoring (not printed):
+- For each company i with rectangle area s_i:
+  - If it doesn’t contain (x_i + 0.5, y_i + 0.5), p_i = 0.
+  - Else p_i = 1 - (1 - min(r_i, s_i) / max(r_i, s_i))^2.
+- Submission score is 1e9 × (sum p_i / n), rounded.
+
+Critical requirements to avoid Wrong Answer:
+- Produce exactly n lines with 4 integers each. No extra spaces at the end of the file, no extra debug prints.
+- Ensure every rectangle:
+  - Is within bounds [0, 10000] with strict a<c and b<d (positive area).
+  - Contains (x_i + 0.5, y_i + 0.5) via the integer containment check above.
+  - Does not overlap any other rectangle with positive area (touching is allowed).
+    - Use the strict positive-area overlap test for rectangles p and q:
+      - Overlap iff max(p.a, q.a) < min(p.c, q.c) AND max(p.b, q.b) < min(p.d, q.d).
+      - If either dimension is equal (<= becomes ==), that’s just touching (allowed).
+- Use 64-bit types (long long) for area computations and differences.
+- Do NOT allocate or iterate over the full 10000×10000 grid.
+- O(n^2) checks are fine; n ≤ 200.
+- Use fast I/O (ios::sync_with_stdio(false), cin.tie(nullptr)).
+- Never rely on floating-point geometry; stick to integer logic as stated above.
+
+Implementation strategy:
+1) Always guarantee a legal baseline solution first:
+   - Initialize each company i with the 1×1 rectangle [x_i, x_i+1] × [y_i, y_i+1].
+   - This is within bounds, contains the required point, and is pairwise non-overlapping in positive area (points are distinct, and 1×1 cells may only touch).
+   - Store both current rectangles and this baseline for each i.
+
+2) Heuristic improvement (time-bounded, optional but recommended):
+   - Maintain rectangles in a vector; repeatedly try to grow/shrink rectangles to move area s_i toward r_i while keeping rectangles non-overlapping and within bounds.
+   - Grow step for rect i on side dir creates a tentative rectangle tmp that adds a 1-unit-wide strip:
+     - left: a_i-1 (if a_i>0)
+     - right: c_i+1 (if c_i<10000)
+     - bottom: b_i-1 (if b_i>0)
+     - top: d_i+1 (if d_i<10000)
+   - Shrink step (helps correct overshoot): removes a 1-unit-wide strip if doing so still contains the seed cell:
+     - left: a_i+1 (only if a_i < x_i+1)
+     - right: c_i-1 (only if c_i > x_i+1)
+     - bottom: b_i+1 (only if b_i < y_i+1)
+     - top: d_i-1 (only if d_i > y_i+1)
+     - Also ensure a_i < c_i and b_i < d_i remain true after shrinking.
+   - Before committing any tentative rect:
+     - Check bounds: 0 ≤ a < c ≤ 10000, 0 ≤ b < d ≤ 10000.
+     - Check it still contains (x_i+0.5, y_i+0.5) using the integer check.
+     - Check no positive-area overlap with any other current rectangle via the strict test above.
+   - Among feasible directions for i, pick the one minimizing |new_area - r_i| (shuffle direction order per attempt to avoid bias). Commit only if it strictly improves |area - r_i|.
+   - Iterate rectangles in randomized order; continue until no improving move exists or the time budget is reached.
+   - Use mt19937 seeded from chrono and a steady_clock time guard (~1.8–1.9s total). Also cap the number of attempted local updates if needed.
+
+3) Robustness/legality safeguards (very important to avoid WA):
+   - After the heuristic, run a validation pass:
+     - For each i, if out of bounds or fails containment, reset rect i to its 1×1 baseline.
+   - Resolve any pairwise positive-area overlaps deterministically:
+     - For any overlapping pair (i, j), compute d_i = |area_i - r_i| and d_j = |area_j - r_j|.
+     - Reset to baseline the “loser”: the one with larger d (or higher index as tie-breaker). Repeat until no overlaps remain or a safe iteration cap is reached.
+   - Optional finer conflict resolution before baseline reset: try to shrink the loser minimally along sides not violating seed containment to eliminate the overlap; if that fails, then reset to baseline.
+   - Perform a final pass to re-validate all constraints (bounds, positive area, containment, and no positive-area overlaps). If any violation remains after conflict resolution, reset the offending rectangle(s) to baseline; as a last resort, fallback to outputting all baselines to guarantee a legal output.
+
+Performance notes:
+- n ≤ 200 allows O(n^2) overlap checks per attempted growth/shrink; keep attempts bounded by a time guard and/or iteration cap.
+- Use only integer math for containment/overlap; use long long for area and difference computations to avoid overflow.
+- Avoid any printing except the final n lines. Do not print scores or diagnostics.
+
+Deliverables:
+- Output only C++17 (or later) code in a single block:
+  - Wrapped in ```cpp and ```.
+  - No extra commentary, blank lines before/after, or text outside the code block.

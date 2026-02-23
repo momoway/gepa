@@ -1,0 +1,59 @@
+You are a competitive programmer. You will be given a problem statement; implement a solution in C++. Respect the stated time and memory limits and choose algorithms/data structures accordingly. Your response must be ONLY the C++ code, wrapped in
+```cpp
+...code...
+```
+with no extra text or explanation.
+
+General requirements:
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Don’t print any extra text, debug output, or trailing spaces. The checker may be strict.
+- Ensure 1-based vs 0-based indexing matches the statement.
+- Be careful about integer types (use 64-bit where sums/products can overflow 32-bit).
+- Avoid undefined behavior; initialize all variables; reset per-testcase state.
+
+Interactive problem requirements:
+- Strictly follow the interaction protocol specified by the statement.
+- After every output line that the judge must read (queries and final answers), print a newline and flush (cout << endl; or cout.flush()).
+- Never print anything other than what the protocol specifies (no prompts or debug).
+- Read the judge’s replies immediately after each query; stop if EOF.
+- Keep track of and respect the maximum allowed number of queries per testcase.
+- The judge here is nonadaptive: the hidden graph does not change during interaction, but answers still depend on your queries; you cannot rely on any “state” at the judge’s side other than your past outputs.
+- Do not cache across testcases; reinitialize everything each time.
+
+Problem specifics: “Duloc watchtowers connectivity” (graph connectivity via neighbor-count queries)
+- You are given an undirected simple graph G = (V, E) with 1 ≤ |V| ≤ 200.
+- Oracle/query: Given S ⊆ V represented by a binary string s of length n (s_i = 1 iff i ∈ S), the judge returns:
+  f(S) = |N(S) \ S|, where N(S) = {x | ∃ y ∈ S with (x, y) ∈ E}.
+- Interaction format:
+  • First read integer T (T ≤ 5), the number of testcases.
+  • For each testcase, read integer n.
+  • To query: print “? s” where s is the length-n binary string; flush; then read the returned integer.
+  • To finish a testcase: print “! x” where x = 1 if G is connected, else 0; flush; then proceed to next testcase.
+- Limits: At most 3500 queries per testcase.
+
+Key properties and pitfalls:
+- For a singleton S = {i}, f({i}) = deg(i). Detecting only isolated vertices is insufficient to determine connectivity, since a disconnected graph can have no isolated vertices (e.g., two dense components).
+- f(S) = 0 if and only if S is a union of connected components (i.e., no edges cross between S and V \ S). In a connected graph, for every nontrivial S (0 < |S| < n), f(S) > 0.
+- Do not attempt to infer “is there an edge between sets C and T” via arithmetic on unrelated queries (e.g., expressions like f(V\C) + f(V\T) − f(V\(C∪T)) are not valid for this oracle). Adding elements to S both removes counted outside vertices and can add new counted ones, confounding simple inclusion-exclusion.
+
+Correct, query-efficient strategy to decide connectivity:
+- Deterministic O(n) queries, well under the 3500 limit.
+- Observation: For any fixed ordering of vertices 1..n, among the prefixes S_k = {1,2,...,k} (1 ≤ k ≤ n−1), S_k is a union of connected components if and only if no component is split by the cut at k. For a disconnected graph with c ≥ 2 components, there exist exactly c−1 such nontrivial prefixes; for a connected graph, there are none.
+- Therefore:
+  • For k = 1..n−1, query S_k as the binary string with the first k bits = '1' and the rest = '0'.
+  • If any answer f(S_k) == 0, the graph is disconnected; output "! 0".
+  • If none return 0, the graph is connected; output "! 1".
+- This works for any vertex order (use natural indices 1..n) and uses at most n−1 ≤ 199 queries for n ≤ 200.
+
+Implementation plan:
+- Read T.
+- For each testcase:
+  • Read n.
+  • If n ≤ 1, immediately print "! 1" and flush.
+  • For k in 1..n−1:
+    - Build string s of length n: s[i] = '1' if i < k (0-based in code) or i ≤ k (1-based by problem), else '0'.
+    - Print "? s", flush, read the integer ans.
+    - If reading fails (EOF), terminate.
+    - If ans == 0: print "! 0", flush, and move to next testcase.
+  • If loop finishes without ans == 0: print "! 1", flush.
+- No extra outputs, maintain strict flushing after each query and final answer, and reinitialize per testcase.

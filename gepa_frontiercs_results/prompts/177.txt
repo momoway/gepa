@@ -1,0 +1,88 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. The execution time and memory limits are strict; write code whose complexity and implementation comfortably respect those limits.
+
+Your response must ONLY contain the C++ code wrapped in:
+```cpp
+// code
+```
+No additional explanation or text is allowed.
+
+Task: Graph 3-Coloring (Max 3-Cut)
+
+- Problem summary:
+  - Input: An undirected simple graph with n vertices and m edges (1 ≤ n ≤ 60000, 0 ≤ m ≤ 200000). Graph may be disconnected. No multi-edges or self-loops.
+  - Output: Exactly one line with n integers c1 … cn, each in {1, 2, 3}, separated by single spaces, followed by a newline. Output must always include exactly n integers; no extra lines or text.
+  - Objective: Minimize the number of conflicting edges (edges whose endpoints have the same color). Scoring is 1 − b/m if m > 0, else 1, where b is the number of conflicting edges. Hidden acceptance typically requires a high score across cases; aim to exceed 0.995 (≈0.99+ consistently) to avoid Wrong Answer due to insufficient solution quality.
+
+- Performance constraints and implementation details:
+  - Time: Treat the stated time limit strictly. Internally, cap any iterative improvement loops to ≈80–90% of the stated limit (e.g., ~800–900 ms if the limit is 1 second) to avoid overruns due to platform variance. Use a steady_clock timer and stop all heavy loops once the time budget is reached. If the official limit is unknown, target ~0.9 seconds total wall time.
+  - Memory: Use adjacency lists; preallocate to O(n + m). Avoid recursion. Avoid per-iteration dynamic allocations in inner loops.
+  - I/O: Use fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);). Print exactly one line with n integers and a trailing newline, no extra spaces/lines.
+
+- Algorithmic approach (high-quality heuristic within time/memory limits):
+  1) Parsing and graph build:
+     - Read n, m; store undirected edges (0-based internally). Use vector<int> adjacency lists or a compact CSR-like structure; store an edges array for quick conflict accounting if needed.
+     - If m == 0: immediately output any valid coloring (e.g., all 1’s) and return.
+
+  2) State and bookkeeping:
+     - Maintain for each vertex u:
+       - color[u] ∈ {0,1,2}.
+       - cnt[u][3]: counts of neighbors by color (updated incrementally).
+       - conf[u] = cnt[u][color[u]].
+     - Maintain a global sumConf = sum(conf[u]) = 2b where b is the total number of conflicting edges.
+     - Maintain a dynamic list (or boolean membership + vector with swap-pop) of vertices with conf[u] > 0. Support O(1) add/remove via position arrays.
+
+  3) Initialization (robust greedy):
+     - Order vertices by descending degree (tie-break randomly).
+     - Assign colors greedily: for each vertex in order, choose the color in {0,1,2} minimizing conflicts with already-colored neighbors (break ties randomly).
+     - Build cnt[u][3], conf[u], sumConf, and the conflicting list in O(n + m).
+
+  4) Local search (efficient min-conflicts with diversification):
+     - Iteratively improve by recoloring one vertex at a time with O(deg(u)) updates:
+       - Selection: Prefer a vertex u with conf[u] > 0 and large potential gain. Implement one of:
+         - Tournament sampling: sample K (e.g., 48–128) vertices from the conflicting list and pick the one with maximum gain = conf[u] − min_c cnt[u][c]. Break ties randomly.
+         - Or maintain a simple priority scheme keyed by (gain, conf[u]) and lazily update/validate entries on pop to avoid O(n) scans.
+       - Move: If bestNewColor strictly improves (gain > 0), recolor u to that color and update cnt/ conf for neighbors in O(deg(u)).
+       - If no improving single-vertex move is found after some iterations, apply one of the escape strategies below.
+     - Tabu search (short-term memory):
+       - Maintain tabuColor[u] and tabuUntil[u] to forbid immediate reversal moves for a short tenure (e.g., 8–20 iterations with slight randomness). Allow aspiration: override tabu if the move leads to a new global best sumConf.
+     - Escape strategies to avoid local minima (apply periodically and within time budget):
+       - Kempe-chain (two-color) component flip:
+         - Pick a conflicting vertex u. Let a = color[u], choose b ∈ {0,1,2}\{a} minimizing cnt[u][b].
+         - BFS the (a,b)-induced component from u. Evaluate flipping the entire component (swap a↔b) using only boundary contributions; apply if it reduces sumConf. Update cnt/ conf incrementally for affected vertices and boundary neighbors.
+       - FM/Kernighan–Lin style refinement on two colors:
+         - For a chosen pair of colors (a,b) and a seed vertex/area (e.g., from a conflicting vertex), collect the (a,b)-induced component by BFS.
+         - Compute initial per-vertex move gain within this component: g[v] = (#neighbors with same color as v within {a,b}) − (#neighbors with the other color within {a,b}).
+         - Run a pass selecting at each step the unpicked vertex with maximum current gain, flip it, update gains of its neighbors in the component, and record the best prefix sum. At the end, apply flips up to the best prefix if total gain > 0. Keep data structures array-based; avoid heaps to reduce overhead.
+       - Occasional small random worsening moves (very low probability) to diversify. Keep them rare and bounded.
+     - Keep track of bestColor (colors achieving bestSumConf so far) and restore at end of the run if needed.
+     - Stop the current run when time budget for the run is exhausted or sumConf reaches 0.
+
+  5) Multi-start strategy:
+     - Within the overall time budget, perform multiple independent starts (e.g., 2–5) with different random seeds/perturbations (shuffle initial order, random tie-breaks, occasional random recolors).
+     - Allocate time per start dynamically (e.g., first run longer, subsequent runs shorter) based on remaining time. Keep and output the best coloring found across starts.
+
+  6) Updates and complexity:
+     - On recolor(u, oldc→newc): for each neighbor v:
+       - Decrement cnt[v][oldc]; if color[v]==oldc then conf[v]-- and update sumConf and conflicting list membership.
+       - Increment cnt[v][newc]; if color[v]==newc then conf[v]++ and update sumConf and membership.
+     - Then set color[u]=newc; conf[u]=cnt[u][newc]; adjust sumConf and conflicting list membership for u.
+     - All updates must be O(deg(u)); avoid scanning all vertices.
+
+  7) Randomness:
+     - Use a fast 64-bit RNG (e.g., splitmix64/xorshift). Seed from a high-resolution clock mixed with a fixed constant for variability and some reproducibility. Use randomness for tie-breaking and diversification only.
+
+  8) Edge cases and correctness:
+     - If m == 0: output n times “1” and newline.
+     - Handle isolated vertices and disconnected graphs.
+     - Internal colors must be {0,1,2}; when printing, output {1,2,3}.
+     - Print exactly n integers with single spaces and a trailing newline; no extra whitespace or lines; no debug output.
+
+  9) Quality target:
+     - Tune parameters (sample size, tabu tenure, frequency of Kempe/FM steps, restart count) to consistently achieve high cut quality (target score ≥ 0.995 on diverse graphs up to n=60000, m=200000) within the time/memory budgets.
+
+- Coding standards:
+  - C++17 or later is acceptable. You may include <bits/stdc++.h>.
+  - Avoid recursion; avoid heavy STL in tight loops; reuse allocated buffers; avoid per-iteration allocations in inner loops.
+  - Ensure all loops that depend on time check the timer to prevent overruns.
+
+Remember: return ONLY the C++ code inside a single ```cpp ... ``` block, with no additional text.

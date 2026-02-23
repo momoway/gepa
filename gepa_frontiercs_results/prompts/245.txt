@@ -1,0 +1,110 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. Always adhere to the following:
+
+- Output ONLY the C++ code wrapped in ```cpp ... ``` so it’s properly formatted. Do not include any extra text or explanation.
+- Respect the stated time and memory limits by choosing appropriate algorithms and data structures.
+- Use fast I/O and avoid unnecessary overhead.
+
+This is an interactive (scored) problem, “Asesino”. Follow the protocol strictly.
+
+Interactive protocol:
+- You may ask queries of the form “? i j” (1 ≤ i, j ≤ n, i ≠ j) meaning: “Does player i think player j is a Knight?”
+- After each query, flush the output (cout.flush()) and read the interactor’s reply: 1 (Yes) or 0 (No). If you ever read -1 or fail to read, terminate immediately.
+- When you determine the impostor x, output “! x”, flush, and proceed to the next test case. Do not expect a reply to the final answer.
+- Do not print any extra text beyond the required protocol lines.
+
+Roles and answers (i = row/asker, j = column/target):
+- Knight: always tells the truth.
+- Knave: always lies.
+- Impostor: a special Knave whom everybody thinks is a Knight.
+
+Answer table (row i, column j):
+- i = Knight:    j = Knight -> 1, j = Knave -> 0, j = Impostor -> 1
+- i = Knave:     j = Knight -> 0, j = Knave -> 1, j = Impostor -> 0
+- i = Impostor:  j = Knight -> 0, j = Knave -> 1, j = Impostor -> 0
+
+Constraints/guarantees:
+- Exactly one Impostor exists. The rest are Knights or Knaves (possibly zero Knaves).
+- Knights ≥ floor(0.3*n) + 1 (strictly more than 30%).
+- The interactor is adaptive but always consistent with all your previous queries and the constraints.
+- Your final answer must be uniquely determined under the adaptive model.
+
+Key property to use:
+- Define s(x, y) = ask(x, y) + ask(y, x). Then:
+  - s(x, y) = 1  if and only if exactly one of x or y is the Impostor.
+  - s(x, y) ∈ {0, 2} if and only if neither x nor y is the Impostor.
+- This property holds regardless of whether the non-impostor is Knight or Knave.
+
+Robust, efficient O(n) strategy with low query count:
+Goal: Guarantee uniqueness while minimizing total queries. The following approach uses at most n queries in the worst case (n-1 if n is odd), and typically fewer due to early stopping.
+
+1) Implement ask(i, j):
+   - Print “? i j”, newline, flush.
+   - Read reply (0/1). If -1 or read fails, terminate.
+
+2) For each test case:
+   - Read n.
+   - Partition players into disjoint pairs:
+       pairs = [(1,2), (3,4), (5,6), ...];
+       Let m = floor(n/2). If n is odd, player last = n is a singleton.
+   - Initialize:
+       found_pair_idx = -1  // index in pairs of the unique impostor-containing pair
+       safe_person = -1     // any guaranteed non-impostor (Knight or Knave)
+   - Scan the first m-1 pairs (i.e., all except the last pair if n is even):
+       For k in [0 .. m-2]:
+         Let (a, b) = pairs[k].
+         Compute s = ask(a, b) + ask(b, a).
+         If s == 1:
+            found_pair_idx = k;
+            break; // exactly one such pair exists; you can stop scanning pairs
+         Else:
+            // Both a and b are guaranteed non-impostors
+            safe_person = a; // keep one safe to disambiguate later
+   - After the loop:
+       Case A: found_pair_idx != -1
+         - If safe_person == -1:
+             // We found the impostor-containing pair as the very first tested pair.
+             // Obtain a safe person:
+             - If n is odd, the singleton (player n) is safe (since impostor is in the found pair).
+               Set safe_person = n.
+             - Else (n even), test the next untested pair (pairs[found_pair_idx + 1]):
+                 Let (u, v) = that next pair.
+                 Compute s2 = ask(u, v) + ask(v, u); // s2 != 1 always here by uniqueness
+                 Set safe_person = u.
+         - Disambiguate within the found pair:
+             Let (a, b) = pairs[found_pair_idx].
+             Compute t = ask(safe_person, a) + ask(a, safe_person).
+             If t == 1: answer a; else answer b.
+       Case B: found_pair_idx == -1
+         - If n is odd:
+             // None of the pairs had s=1, so the singleton must be the Impostor
+             Answer the singleton (player n).
+         - Else (n even):
+             // The last untested pair must be the impostor-containing pair
+             Let (a, b) = pairs[m-1].
+             // safe_person was set from earlier pairs (since m-1 ≥ 1)
+             Compute t = ask(safe_person, a) + ask(a, safe_person).
+             If t == 1: answer a; else answer b.
+   - After printing “! x”, newline and flush, immediately proceed to the next test case (do not read a reply).
+
+Why it’s correct and efficient under the adaptive model:
+- Exactly one disjoint pair contains the Impostor; for that pair s=1; for all other pairs s∈{0,2}. Testing up to m-1 pairs ensures:
+  - If a tested pair has s=1, we know the unique impostor-containing pair and can stop scanning.
+  - If none has s=1:
+    - For odd n, the singleton is necessarily the Impostor.
+    - For even n, the last untested pair is necessarily the impostor-containing pair.
+- Any pair with s≠1 yields two guaranteed non-impostors; one suffices as a safe disambiguator.
+- Disambiguation within the unique s=1 pair requires only 2 more queries with a safe person via s(safe, candidate).
+- Total queries:
+  - Worst-case even n: 2*(m-1) to scan first m-1 pairs + 2 to disambiguate = n.
+  - Worst-case odd n: 2*m = n-1 (no disambiguation needed).
+  - Often much less due to early stopping when the s=1 pair appears early.
+
+Implementation notes:
+- Use fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).
+- Maintain 1-based indexing.
+- Never query i == j.
+- Always flush after each query and after each final answer.
+- If you read -1 (or input fails while reading a reply), terminate immediately.
+
+Output format requirement reminder:
+- Output ONLY the C++ solution code wrapped in ```cpp ... ``` with no extra commentary.

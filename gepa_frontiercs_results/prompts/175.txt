@@ -1,0 +1,120 @@
+You are a competitive programmer. You will be given a Max-3SAT problem instance and must implement a high-performance C++17 solver that respects tight execution time and memory limits and maximizes the number of satisfied clauses. Your response must ONLY contain the C++ code, wrapped in ```cpp and ``` for proper formatting—no additional explanations or text.
+
+Task and input/output:
+- Max-3SAT: Boolean formula in CNF where each clause has exactly three literals.
+- Input:
+  - Line 1: two integers n and m
+    - 1 ≤ n ≤ 3000, 0 ≤ m ≤ 2,000,000
+  - Next m lines: three integers a, b, c each in [-n, n], non-zero
+    - Positive x means variable x; negative -x means ¬x
+    - Each clause is (a ∨ b ∨ c)
+- Output:
+  - Exactly one line: n integers x1 x2 … xn (0 or 1); 1 is TRUE, 0 is FALSE
+  - Must print exactly n integers separated by a single space and a trailing newline, even if m = 0
+
+Scoring/acceptance and judge behavior:
+- Let s be the number of satisfied clauses; score = s / m (or 1 if m = 0).
+- Any assignment is accepted and scored; your goal is to maximize s.
+- Important: Some judges mark timeouts as “Wrong Answer” and may not show messages. You must ensure fast termination and always print a valid assignment.
+
+Hard constraints and engineering requirements:
+- Very large instances: m up to 2,000,000 ⇒ total literal occurrences = 3m up to 6,000,000.
+- Memory: plan O(n + m) or O(3m) flat arrays; avoid per-element STL overhead. Use 32-bit ints where safe; use unsigned char for small counters/flags (0..3, bools).
+- I/O:
+  - Implement custom fast input using fread-like buffered reader or POSIX read with a large static buffer; do NOT use iostreams (cin/cout) in hot paths or at all.
+  - Implement custom buffered output; do NOT rely on iostreams; do NOT print extra spaces/newlines or any debug text.
+  - Always flush the output buffer explicitly at the end.
+- Deterministic unless randomness is beneficial; if using randomness, use a lightweight PRNG (e.g., xorshift64*/xoshiro) seeded from a monotonic high-resolution time source. Use an unbiased “below(n)” method (e.g., 128-bit multiply-high) for uniform integers.
+- Avoid recursion; avoid heavy abstractions and per-element dynamic allocation. Judges typically compile with -O2 or higher; write code with that in mind.
+
+Representation and data structures:
+- Store clauses in three flat arrays A[m], B[m], C[m] of 32-bit ints (sign encodes literal).
+- Count per-variable positive/negative occurrences while reading:
+  - degPos[i], degNeg[i].
+- Build literal occurrence lists using flat arrays with prefix sums:
+  - For each variable i (1-based):
+    - posStart[i]..posStart[i+1]-1 indexes into posIdx[] listing clauses where +i occurs.
+    - negStart[i]..negStart[i+1]-1 indexes into negIdx[] listing clauses where -i occurs.
+  - Build in two passes: count, then prefix sum, then fill (use temporary write pointers).
+- Assignment arrays:
+  - x[i] in {0,1}; unsigned char saves memory.
+  - bestX[i] to store best-so-far assignment.
+- Clause state:
+  - t[j] = number of true literals in clause j (0..3). Use unsigned char (0..3).
+  - Maintain satisfied count s = m - unsatCount (derive from unsatisfied set to avoid double-counting bugs).
+  - Track unsatisfied clauses (t[j] == 0) with:
+    - unsatFlag[j] (byte), posInUnsat[j] (int), and unsatList (int array),
+    - Use swap-erase O(1) add/remove. Handle the “remove last element” case correctly; never access out-of-range when unsatCount becomes 0.
+  - Clauses can contain repeated variables and/or both a variable and its negation; all state updates must be per literal occurrence so duplicates are handled exactly.
+
+Algorithm (baseline + fast local search):
+1) Read all clauses; fill A, B, C; count degPos/degNeg while reading.
+   - Be robust to very large inputs: use a single large buffer (4–8MB). Implement readInt that:
+     - Skips whitespace; parses an optional leading '-' sign; reads digits; handles buffer boundaries; returns false on EOF.
+     - Never reads past buffer end; refills as needed.
+2) Initial assignment (majority baseline):
+   - x[i] = 1 if degPos[i] >= degNeg[i], else 0.
+   - Copy to bestX; this baseline alone must be printable quickly and is your fallback if time expires early.
+3) Build occurrence lists (posIdx/negIdx) with prefix sums using degPos/degNeg (two-pass build).
+4) Evaluate current assignment:
+   - For each clause j, compute t[j] by evaluating its three literals under x.
+   - Build the unsatisfied set where t[j] == 0 using unsatFlag/swap-erase.
+   - s = m - unsatCount; bestS = s.
+5) Randomized local improvement (WalkSAT-style), under a strict wall-clock budget:
+   - Enforce a strict global deadline from program start using a monotonic clock (e.g., chrono::steady_clock or clock_gettime). Many judges treat even slight overruns as WA/TLE.
+   - Suggested total wall-clock caps (including parsing and output); choose the smallest that safely fits the platform and keep a conservative safety margin for output:
+     - m ≥ 1,600,000: total ~0.17–0.20 s
+     - 1,200,000 ≤ m < 1,600,000: total ~0.19–0.23 s
+     - 800,000 ≤ m < 1,200,000: total ~0.22–0.26 s
+     - 400,000 ≤ m < 800,000: total ~0.26–0.30 s
+     - else: ~0.28–0.33 s
+   - Derive the local search budget from the global deadline minus a clear margin (e.g., at least 10–15 ms reserved for output and buffer flushing). If the remaining budget is too small, skip local search and print the baseline immediately.
+   - While time remains and unsatList is non-empty:
+     - Pick a random unsatisfied clause j (uniform over unsatCount).
+     - Extract its variables v ∈ {abs(A[j]), abs(B[j]), abs(C[j])}; deduplicate to at most 3 candidates quickly.
+     - For each candidate v, compute a fast approximate make/break score delta(v) = make(v) - break(v) by scanning only the occurrence lists of v:
+       - If x[v] == 1 (consider flip to 0):
+         - For q in posIdx[v]: if t[q] == 1, break++;
+         - For q in negIdx[v]: if t[q] == 0, make++;
+       - Else (x[v] == 0, consider flip to 1):
+         - For q in posIdx[v]: if t[q] == 0, make++;
+         - For q in negIdx[v]: if t[q] == 1, break++;
+       - This “t==1/0” criterion is a fast approximation. Actual state updates on flip must be exact per-occurrence (see below), correctly handling duplicates and clauses containing both v and ¬v.
+     - Choose the variable with the highest delta; break ties randomly. If the best delta ≤ 0, with small probability p (e.g., 1/7), pick one of the candidates uniformly at random to escape local minima.
+     - Flip the chosen variable v and update the state precisely:
+       - x[v] ^= 1.
+       - Update t[q] for all occurrences of v per literal occurrence, and update the unsatisfied set only on 0↔1 boundary crossings:
+         - If x[v] changed 0→1:
+           - For each q in posIdx[v]: old = t[q]; ++t[q]; if (old == 0 && t[q] > 0) remove q from unsat.
+           - For each q in negIdx[v]: old = t[q]; --t[q]; if (old > 0 && t[q] == 0) add q to unsat.
+         - If x[v] changed 1→0:
+           - For each q in posIdx[v]: old = t[q]; --t[q]; if (old > 0 && t[q] == 0) add q to unsat.
+           - For each q in negIdx[v]: old = t[q]; ++t[q]; if (old == 0 && t[q] > 0) remove q from unsat.
+       - The add/remove must be guarded by unsatFlag[j] + swap-erase to avoid double operations and must be correct under duplicates and clauses containing both signs of v (operating per literal occurrence is required; correctness is derived from detecting only 0↔1 or 1↔0 crossings).
+       - After flip, set s = m - unsatCount. If s improves bestS, copy x to bestX; if s == m, stop early.
+     - Check time frequently; e.g., every 128–512 flips (use smaller interval on larger m).
+   - Optional: very occasional restarts from the majority baseline or a lightly perturbed version, only if time clearly remains; keep these minimal to avoid overhead.
+6) Output bestX (or x if no improvement). Always output exactly n integers separated by single spaces and a trailing newline. Never print extra characters. Always flush explicitly.
+
+Performance and implementation tips to avoid WA/TLE:
+- Enforce a strict global deadline measured from program start; exit local search immediately when exceeded. Keep a generous safety margin for output flushing.
+- I/O:
+  - Implement fast input via a large fread/read buffer (e.g., 4–8 MB). Robustly parse signed integers and skip whitespace. Avoid iostream completely (don’t include <iostream>, don’t call ios::sync_with_stdio).
+  - Implement buffered output; ensure zero extra prints; flush at end. Avoid per-integer std::to_string or printf calls in a loop; buffer digits directly.
+- Memory:
+  - Use contiguous arrays; avoid std::vector in hot paths.
+  - 32-bit ints for indices are fine; unsigned char (uint8_t) for small counters/flags saves memory.
+- Indexing:
+  - Variables are 1-based [1..n]; clauses are 0-based [0..m-1].
+  - Build posStart/negStart as prefix sums so that for v in [1..n], occurrences are in [start[v], start[v+1]).
+- Edge cases:
+  - m == 0: immediately print any valid assignment (e.g., all zeros) followed by a single trailing newline and return.
+  - Clauses may contain repeated variables and/or both a variable and its negation. All update logic for t[], s, and the unsat set must be per occurrence and correct under duplicates. Only change unsat membership on 0→1 or 1→0 boundary crossings, and derive s as m - unsatCount to avoid double-counting in mixed-sign/duplicate cases.
+- RNG:
+  - Use a fast 64-bit xorshift*/xoshiro. Implement an unbiased uniform “below(n)” using 128-bit multiply-high to avoid modulo bias. Seed from a high-resolution steady clock and optionally mix in n and m.
+- Output:
+  - Exactly n integers, single-spaced, with a single trailing newline. No leading/trailing spaces (except the single trailing newline). No debug prints. Explicitly flush.
+
+Deliverable:
+- Provide a single C++17 program that follows all of the above.
+- The response must contain ONLY the C++ code, wrapped in ```cpp fences and ```; no explanations or extra text.

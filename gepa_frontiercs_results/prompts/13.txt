@@ -1,0 +1,115 @@
+You are a competitive programmer. You will be given an interactive problem and must implement a solution in C++. Wrap the solution in ```cpp ... ``` and output ONLY the code (no extra text, no explanations, no debug prints).
+
+IMPORTANT: This is an interactive problem. You MUST follow the exact facts and protocol below (they may not be restated later). Include all implementation details and edge cases as specified.
+
+Problem summary (complete, precise):
+- Infinite 2D grid; the robot is confined to the first quadrant: x > 0, y > 0.
+- The robot starts at integer coordinates (sx, sy) with 1 <= sx, sy <= 20.
+- Each turn the robot moves like a king to one of the 8 neighboring cells: |nx - rx| <= 1, |ny - ry| <= 1, and (nx, ny) != (rx, ry). It cannot move outside the first quadrant.
+
+Your move per turn:
+- Before the robot moves, you must mark exactly one cell (xm, ym) black.
+- You must always mark within 1 <= xm <= TMAX and 1 <= ym <= TMAX. Use TMAX = 2000 (some judges hard-limit at 2000 even if a statement variant says 3000; using 2000 is safe everywhere).
+- Once black, a cell remains black forever (you may choose an already black cell, but avoid wasting turns).
+
+Outcome:
+- After you mark a cell and the robot moves, if the robot steps onto a black cell, the interactor outputs "0 0" and terminates.
+- Your goal is to make the robot explode in as few moves as possible. Any solution using > TMAX moves is judged incorrect.
+
+STRICT interaction protocol you must implement exactly:
+1) Read the initial sx sy from stdin.
+2) For up to TMAX turns, repeat:
+   - Compute and print one line: "xm ym" (both in [1, TMAX]), then flush immediately.
+   - Read exactly one pair from stdin: nx ny (the robot’s new position).
+   - If nx == 0 and ny == 0, terminate your program immediately and cleanly (the robot exploded).
+   - Otherwise, update the robot’s current position to (nx, ny) and continue.
+3) Never print more than TMAX moves. Never print invalid coordinates. Do not print any extra text or debugging output.
+4) Always flush after every printed move (endl is acceptable; also set ios::sync_with_stdio(false); cin.tie(nullptr);).
+
+Performance and implementation requirements:
+- Keep each turn O(1) logic (no scans over big ranges).
+- Track cells you have already painted to avoid duplicates (use an efficient set or bitset).
+- Validate every printed (x, y): 1 <= x, y <= TMAX.
+- If input fails or the interactor returns 0 0, exit immediately.
+- Do not attempt to read a response in any turn unless you have printed exactly one move in that turn.
+- Exactly one print and one read per loop iteration. Do not have any iteration with no IO.
+- Use C++17; set fast IO: ios::sync_with_stdio(false); cin.tie(nullptr);.
+- Use unordered_set<uint64_t> to track black cells; reserve capacity generously to avoid rehashing (e.g., reserve(1<<18)).
+
+Robust, adversary-resistant strategy (battle-tested, tuned for TMAX=2000):
+
+Why TMAX=2000 matters:
+- You must keep the construction under budget and preserve enough moves to finish. Building too large a fence risks exceeding TMAX.
+
+High-level plan (parameters tuned for TMAX=2000):
+- Build an “L-shaped” fence using the axes as two walls, plus two painted sides to form a closed box [1..V]×[1..H]:
+  - Choose B = 650. Then V = B + 1 = 651 and H = B + 1 = 651.
+    - Painting both sides needs 2*B + 1 = 1301 cells. This leaves ~699 moves for guarding windows during construction and for the final funnel. This margin is safer than B=700 in adversarial cases.
+  - The vertical side is x = V for y = 1..V.
+  - The horizontal side is y = H for x = 1..H.
+  - Paint the corner (V, H) as early as possible to remove the diagonal breach there.
+
+Representation and helpers:
+- Pack coordinates for the set: key = (uint64_t(x) << 32) | uint64_t(y).
+- Track side-completion with arrays:
+  - vector<char> vside(V+1, 0) for vertical side cells (index by y in [1..V]).
+  - vector<char> hside(H+1, 0) for horizontal side cells (index by x in [1..H]).
+- Maintain build pointers (next unpainted entry on each side):
+  - vy_ptr = 1: next y to paint on the vertical side (V, vy_ptr).
+  - hx_ptr = 1: next x to paint on the horizontal side (hx_ptr, H).
+- Utilities:
+  - clamp to [1..limit].
+  - is_black(x, y).
+  - mark_local(x, y): insert into black; update vside/hside if the painted cell is on a side; then advance vy_ptr/hx_ptr past already-painted entries.
+
+CRITICAL sequencing detail:
+- Each iteration prints exactly once, then reads exactly once. You may update your local “black set” immediately after printing (so your next decision sees your own painted cell) or after reading; both are acceptable. However, you MUST NOT try to “print twice in one turn” or “switch mid-turn.” If your side completion state changes because of the cell you just printed, you will only act on that on the next turn after reading the interactor’s move.
+
+Phase 1: Safely build the L-shaped fence with proactive guarding.
+- Always prioritize painting (V, H) early if still white.
+- Grow each side from the low indices upward (from near the axes): vertical at y = vy_ptr, horizontal at x = hx_ptr.
+- Proactive window guarding near an unfinished side to prevent slips:
+  - Define approach distances (non-negative): dx_to_V = max(0, V - rx), dy_to_H = max(0, H - ry).
+  - If the robot is approaching an unfinished side, keep a 5-tall (or 5-wide) window sealed around its projection on that side; 5 >= 2*robot_speed+1 is safe against adversarial drift while you alternate attention:
+    - For vertical side x=V: maintain y in {ry-2, ry-1, ry, ry+1, ry+2} clamped to [1..V].
+    - For horizontal side y=H: maintain x in {rx-2, rx-1, rx, rx+1, rx+2} clamped to [1..H].
+  - Engage guarding when dx_to_V <= 3 for vertical (and side unfinished) or dy_to_H <= 3 for horizontal (and side unfinished).
+  - If both sides need guarding simultaneously, choose the side with smaller approach distance; on ties, alternate by turn parity to avoid starving one side (e.g., even turns prefer vertical, odd turns prefer horizontal). If the preferred window is already fully sealed, attempt the other side’s window in the same turn (still only one paint per turn).
+- If neither side needs guarding (robot is far from both unfinished sides):
+  - Advance vy_ptr/hx_ptr past already painted entries.
+  - Choose the next side cell to paint by Chebyshev closeness to the robot:
+    - Compare dV = max(|rx - V|, |ry - vy_ptr|) versus dH = max(|rx - hx_ptr|, |ry - H|).
+    - Paint the closer; on ties prefer vertical.
+  - If one side completes, focus on finishing the other.
+- Always skip repainting already black cells (check the set first). Advance pointers accordingly.
+- Do NOT attempt to “switch to Phase 2 mid-turn.” Finish the current printed move; only after reading the response (i.e., on the next loop iteration) should phase2 become active once both sides are complete.
+
+Phase 2: Funnel the robot SW toward (1,1) strictly inside the box and force explosion.
+- Operate strictly inside the completed box [1..V]×[1..H]. Do NOT paint outside this box in Phase 2 (always clamp x to [1..V], y to [1..H]).
+- Do NOT immediately pre-paint the triple (2,1), (1,2), (2,2) when Phase 2 starts; that may sometimes prevent entry into (1,1) under adversarial play.
+- Each turn, paint to bias the robot’s motion SW/S/W and shrink the safe region:
+  - Try, in this order (clipped to [1..V]×[1..H], skipping duplicates and already black):
+    1) (min(rx+1, V), min(ry+1, H))  // NE of robot
+    2) (min(rx+1, V), ry)            // E of robot
+    3) (rx, min(ry+1, H))            // N of robot
+  - If all three are already black, try a small NE-biased fallback set relative to the robot, clipped to the box and skipping duplicates:
+    - e.g., (rx+2,ry+2), (rx+2,ry+1), (rx+1,ry+2), (rx+3,ry+2), (rx+2,ry+3), (rx+3,ry+3), etc.
+- This builds an irreversible staircase frontier that the robot cannot cross back, ensuring eventual explosion near (1,1).
+- When the robot is finally near the origin (rx <= 3 and ry <= 3), it is safe to finalize by painting any remaining among {(2,1), (1,2), (2,2)} that are still white to guarantee explosion shortly.
+
+Safety and correctness checklist:
+- Never print more than TMAX moves.
+- Every loop iteration must:
+  - Choose exactly one valid cell (x,y) in [1..TMAX]×[1..TMAX].
+  - Print it and flush.
+  - Immediately read exactly one response pair (nx,ny).
+- Exit immediately if nx==0 && ny==0 or if input fails.
+- All per-turn decisions must be O(1); no large scans.
+- Use unordered_set with reserved capacity to track black cells and avoid repainting.
+- Always validate and clamp printed coordinates before output.
+- Maintain clear separation of turn steps: compute -> print -> (optionally update local black set to include printed cell) -> read -> handle termination/update robot position.
+- No extra output besides the two integers per move (plus newline).
+
+Deliverable:
+- Produce self-contained, clean C++17 code that implements the above robust strategy and protocol precisely.
+- Wrap the program in ```cpp ... ``` fences and output ONLY the code.

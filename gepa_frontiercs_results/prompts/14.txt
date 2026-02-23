@@ -1,0 +1,109 @@
+You are a competitive programmer. Implement an interactive C++17 solution to determine the exact length n of an unknown simple cycle (1 ≤ n ≤ 10^9) using up to 200000 walk operations.
+
+Interaction model (strict):
+- Command: walk x
+  - x is an integer with 0 ≤ x ≤ 10^9.
+  - Effect: move the token x steps forward along the hidden Hamiltonian cycle p from its current vertex.
+  - Response: a single integer (the vertex label in [1..n]).
+- Command: guess g
+  - g is an integer with 1 ≤ g ≤ 10^9.
+  - Effect: end the interaction. The guess must be exactly n.
+
+Protocol requirements:
+- Print exactly "walk X" or "guess G" followed by a newline, then flush stdout immediately.
+- After each "walk", read exactly one integer label. If input fails, terminate immediately.
+- Do not exceed 200000 total "walk" commands (each chunked "walk" counts).
+- Do not print any extra text; your program’s output must be ONLY C++ code enclosed in a single ```cpp block, no explanations.
+
+Overview of the robust approach:
+- Use a birthday-collision technique to quickly obtain a multiple of n.
+- Factor that multiple g completely (64-bit safe).
+- Reduce g to exactly n using anchored divisibility tests, always starting from the same anchor vertex and always restoring to it.
+- Maintain and use the current offset modulo g to guarantee starting every test at the correct anchor, even after many moves.
+- Verify the final candidate by a single anchored check before guessing.
+
+Detailed algorithm:
+
+0) Types and limits
+- Use uint64_t for all cumulative step counts, differences, and candidate g. They can reach ≈ 2e14 safely.
+- Use int for labels (they are in [1..1e9]).
+- Each "walk" must respect x ≤ 1e9; implement chunking for any larger intended move.
+
+1) Initial anchor and state
+- Issue one "walk 0" to read the starting label without moving. Count this as one walk. Let:
+  - anchor_label = returned label (int)
+  - total_steps = 0 (uint64_t): total sum of all x sent since the very beginning
+  - walk_ops = 1 (counting the initial "walk 0")
+- Maintain current_label = last returned label.
+- Maintain a hash map first_seen[label] = first time T (uint64_t total_steps) when that label was seen.
+  - Reserve a large capacity (around 1<<20) and set max_load_factor to about 0.7.
+
+2) First collision to get a multiple of n
+- Repeatedly issue random "walk x" with x drawn uniformly from [1, 1e9] (never use x=0 here). Update:
+  - total_steps += x
+  - current_label = read label
+  - If current_label not in first_seen, set first_seen[current_label] = total_steps.
+  - If current_label already in first_seen with time T1, define T2 = total_steps; then g0 = T2 - T1 (g0 > 0) is guaranteed to be a multiple of n. Stop immediately at the first such collision.
+- Set anchor_label = current_label (the collision label at T2). From now on, all tests must start from this exact anchor vertex. Do not change anchor_label again.
+
+3) Anchor state and offset tracking
+- From the moment of collision (time T2), define g = g0 and maintain an "offset modulo g" for the current position with respect to this anchor.
+  - Let offset_mod_g = 0 when you are at anchor_label at T2.
+  - After every subsequent move by delta steps, update offset_mod_g = (offset_mod_g + (delta % g)) % g.
+- Implement a helper snap_to_anchor(g):
+  - If offset_mod_g == 0, you are already at the anchor; do nothing.
+  - Otherwise, let need = (g - offset_mod_g) % g; perform walk_many(need); this guarantees returning to anchor (since g is a multiple of n), then set offset_mod_g = 0.
+  - After snapping, you may issue a "walk 0" and assert the returned label equals anchor_label (optional, but recommended for extra safety).
+- Critical invariant: Before every divisibility test and after any failed test (after the restoration move), call snap_to_anchor(g) so the next test starts exactly at the anchor.
+
+4) Factor g0 completely (64-bit safe)
+- Implement deterministic Miller–Rabin primality testing for all 64-bit integers using 128-bit intermediates (__int128) for modular multiplication. Use bases {2, 3, 5, 7, 11, 13, 17}. For extra safety you may include more bases {19, 23, 29, 31, 37} after the small-prime trial division.
+- Implement Pollard–Rho factorization with 128-bit modular multiplication and randomized seeds/constants to escape worst cases.
+- Do a small-prime trial division for primes up to at least 10^6 as part of factorization steps (or at minimum primes in {2,3,5,7,11,13,17,19,23,29,31,37}) to strip easy factors quickly and reduce the load on Pollard–Rho.
+- Factor g0 into primes with multiplicity, sort, then group into (p, exponent).
+
+Optional shrink-before-factorization (safe optimization):
+- After the first collision, you may gather a few more collision differences while staying anchored (each gives another multiple of n) and set g0 to gcd of these differences to shrink g before factorization. Never rely on gcd alone to produce n; you must still run anchored divisibility tests to finish exactly at n.
+
+5) Anchored divisibility reduction (the crux)
+- Ensure you are at the anchor: snap_to_anchor(g).
+- For each prime p in the factorization list, process up to its multiplicity times:
+  - If g % p != 0, stop processing this prime.
+  - Let P = g / p (exact integer division).
+  - Test whether P is still a multiple of n with a single anchored jump:
+    - First snap_to_anchor(g) to be 100% at the anchor.
+    - Perform walk_many(P). Update offset_mod_g accordingly.
+    - Read the label r:
+      - If r == anchor_label: Success. Then P is a multiple of n. Set g = P, and recompute offset_mod_g %= g (i.e., offset_mod_g = offset_mod_g % g; since you are at anchor, set it to 0). Continue trying to remove p again for its multiplicity.
+      - Else: Failure. Restore to the anchor with one more anchored completion:
+        - Perform walk_many(g - P). This makes the total movement equal to g, which returns to the anchor because g ≡ 0 (mod n). Update offset_mod_g and then call snap_to_anchor(g) to set offset_mod_g = 0.
+        - Stop trying to remove this p any further; proceed to the next prime.
+- Always ensure every test segment starts at the anchor and ends back at the anchor before moving on. Use snap_to_anchor(g) liberally to enforce this invariant.
+
+Important pitfalls to avoid (these caused WAs in practice):
+- Never perform floor divisions during reduction. Only test P = g / p when g % p == 0 exactly.
+- Never start a divisibility test from a non-anchor position. Always snap_to_anchor(g) immediately before testing a factor.
+- After a failed test (r != anchor_label), always restore by walking exactly (g - P) and then snap_to_anchor(g) again.
+- Do not change anchor_label once set at the first collision T2.
+- Do not rely on gcd of multiple collisions alone; you must use anchored tests to exactly determine n.
+
+6) Final verification and guess
+- After processing all prime factors, you should have g = n.
+- Do one final anchored check:
+  - snap_to_anchor(g).
+  - Perform walk_many(g). If the returned label is not anchor_label, something went wrong; as a safeguard, snap back to the anchor by walking (g % 1e9)-chunked multiples of g until you get the anchor, then continue reductions if any leftover factors remain (this should not happen if the logic above is followed). Under normal operation, r == anchor_label here.
+- Output "guess g" and flush, then terminate.
+
+Implementation details and helpers:
+- walk_single(x): sends one "walk x", reads the integer label. Increments total_steps and walk_ops. Returns false if input fails or if walk_ops would exceed the limit.
+- walk_many(T): performs a total move of T by chunking into pieces ≤ 1e9. After each chunk, update total_steps, walk_ops, current_label, and if currently reducing by g, also update offset_mod_g = (offset_mod_g + (chunk % g)) % g. Return false if any input fails.
+- Use mt19937_64 seeded from chrono for RNG; uniform_int_distribution<uint64_t>(1, 1000000000) for random steps.
+- Carefully track and respect the 200000 walk limit, including all chunked moves and any auxiliary "walk 0" checks.
+- Use fast I/O (sync_with_stdio(false), tie(nullptr)) and flush after every print.
+
+Why these instructions are correct and robust:
+- The first repeated label guarantees g0 is a positive multiple of n.
+- Factorization plus anchored divisibility tests removes only those prime factors whose exact integer quotient remains a multiple of n. Starting each test at the same anchor and restoring to it after a failed attempt prevents drifting and false positives.
+- Tracking offset_mod_g and snapping to the anchor before every test eliminates state bugs that lead to wrong answers.
+- Deterministic 64-bit-safe Miller–Rabin with Pollard–Rho ensures correct factorization of g0.
+- A final anchored verification of g prevents accidental wrong guesses.

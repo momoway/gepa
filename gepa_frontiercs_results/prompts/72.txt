@@ -1,0 +1,81 @@
+You are a competitive programmer. You will be given exactly one 6x6 Rush Hour-like puzzle instance and must output a C++ program that reads the board, optionally performs an in-bounds sequence of “formation” moves to create a new puzzle from the given initial board, computes the exact minimum number of steps to solve that new puzzle, and outputs both the minimum steps and the sequence of formation moves.
+
+Strict constraints and required behaviors:
+- Input: 6 lines, each with 6 integers (0..n). 0 means empty; otherwise it’s a vehicle id. Vehicles are 1 cell wide; cars have length 2 and trucks length 3. Ids are 1..n where the red car’s id is 1.
+- The red car (id=1) is horizontal and lies in the 3rd row (0-based row index 2). The exit is to the right edge of this row.
+- A “step” is a move by exactly 1 unit along a vehicle’s motion axis (horizontal vehicles move L/R, vertical U/D). No diagonal moves.
+- The task: starting from the input board, you may apply a sequence of legal in-bounds formation moves (each step 1 unit, all vehicles must remain fully on the 6x6 board after each step) to obtain a new puzzle configuration. You must then compute the exact minimum number of steps required to solve that new puzzle (i.e., to move the red car completely off the board through the right edge), and output:
+  1) On the first line: min_steps_to_solve_new_puzzle number_of_formation_moves
+  2) Then exactly number_of_formation_moves lines, each: vehicle_id direction, where direction ∈ {U, D, L, R} and is consistent with the vehicle’s orientation.
+- It is acceptable to output zero formation moves (the new puzzle equals the input). Higher scoring comes from forming a harder puzzle (higher min steps).
+- Performance constraints: 2 seconds time limit, 1024 MB memory limit. Implement careful optimizations (fast I/O, compact state, reserved hash maps, etc.).
+- Output format must be exact. Your final response must contain only the C++ code wrapped in ```cpp ... ``` with no extra text.
+
+Domain conventions and key solver rules to implement:
+- The 6x6 board uses 0-based indices [0..5] for rows and columns.
+- For each vehicle:
+  - Determine orientation and length from its occupied cells in the input:
+    - Horizontal if all occupied cells share the same row. Position is its leftmost column.
+    - Vertical if all occupied cells share the same column. Position is its topmost row.
+  - Cars have length 2; trucks have length 3. (You can infer from count of occupied cells.)
+- State representation for search/solver:
+  - The canonical state stores a single integer “position” per vehicle id (index id-1):
+    - Horizontal: leftmost column index.
+    - Vertical: topmost row index.
+  - For non-red vehicles, valid positions are 0..(6 - length).
+  - For the red car ONLY inside the solver, allow the leftmost column position in [0..6], where 6 means the car is fully off the board (solved).
+  - When building a 6x6 occupancy from a state, mark only in-bounds cells (ignore any off-board part of the red car).
+  - Pack the state into a 64-bit integer using 4 bits per vehicle position (supports values up to 15; the red’s max is 6). This allows fast hashing/comparison.
+- Solver move generation (EXACT BFS; shortest steps):
+  - For any vehicle, attempts are only ±1 step along its orientation.
+  - A +1 step moves the front forward; a -1 step moves the rear backward.
+  - “Newly entering” cell rule:
+    - To move one step forward, the newly entering cell on the board must be empty if it’s in-bounds.
+    - If the newly entering cell is out-of-bounds, that step is allowed ONLY for the red car moving right (to exit).
+    - All other vehicles and directions must have newly entering cells in [0..5] and empty.
+  - Thus, for the red moving right from position x (length=2): a right move to x+1 is allowed if the cell at column x+2 is either empty (if 0..5) or off-board (>=6). Allow positions up to x=6. Moving left from x=6 or x=5 back onto the board is permitted if the in-bounds entering cell is empty (reversibility).
+  - Goal test: red’s leftmost column == 6 (fully out/off-board).
+  - Use a standard BFS (queue), exploring all unit-step neighbors until reaching the goal. Return the shortest distance when found.
+  - To speed repeated evaluations for different candidate formation states, maintain a global cache keyed by the packed state for exact distances to goal whenever known. At minimum, cache the distance for each evaluated starting state. Optionally use any additional safe memoization that does not break exactness (e.g., if during BFS you reach a state that already has a known exact distance-to-goal in the cache, you can track an upper bound and stop when BFS depth reaches that bound; do not sacrifice exactness).
+- Formation move generation (only to build the new puzzle before solving):
+  - From any in-bounds state (red must be fully on-board during formation), generate legal ±1 moves that keep all vehicles entirely within [0..5] after the move and satisfy the newly entering in-bounds cell being empty.
+  - For formation moves, red moves right must NOT step off the board (i.e., its leftmost column must stay in [0..(6 - length)]).
+  - Each formation move is recorded as a pair: (vehicle_id, direction character U/D/L/R).
+- Parsing and discovery:
+  - Parse the 6x6 matrix, find max vehicle id n (1..n).
+  - For each id, collect all its cell coordinates from the matrix, infer orientation, fixed coordinate (row for H, column for V), length, and initial position (leftmost col for H, topmost row for V).
+  - Store data in vectors indexed by id-1: ori[i] ∈ {'H','V'}, len[i] ∈ {2,3}, fixedCoord[i] (row for H, col for V), pos[i] for the position as defined above.
+- Occupancy:
+  - Build a 6x6 occupancy for a given state by marking only the in-bounds cells of each vehicle. For the red with pos in {5,6} or partially off-board, only mark cells where 0 <= col < 6.
+  - Consider using a 36-bit bitboard (uint64_t) for occupancy: index cell as r*6 + c. Precompute per-vehicle bitmasks for each possible in-bounds position to speed checks. For the red, also handle the special pos=6 (no marked cells) and pos=5 (one in-bounds cell).
+- BFS optimizations:
+  - Use a queue of states; store positions in a compact array/vector<int>. Pack to 64-bit keys for visited checks.
+  - Use a custom fast hasher (e.g., splitmix64) and reserve large capacities for unordered_set/unordered_map to avoid rehash overhead.
+  - Avoid repeated allocations: reuse buffers where possible.
+  - Keep the solver exact; do not use heuristics that risk under- or over-counting steps.
+- Formation search (to increase difficulty):
+  - Start from the initial parsed board. Compute its exact minimum steps using the BFS solver (and cache the result).
+  - Perform a time-limited stochastic search (e.g., randomized walk with occasional greedy evaluation, hill-climbing, or small beam search) over formation states, within a global wall-clock budget ~1.8s.
+  - Maintain current state and a vector of formation moves from the initial state. Enforce:
+    - No immediate reversals (avoid selecting a move that undoes the previous step for the same vehicle).
+    - Keep all vehicles in-bounds; never move the red off-board during formation.
+    - Optionally maintain a small tabu set of recently seen formation states in the current walk to reduce short cycles.
+  - Evaluate candidate states encountered using the exact BFS solver (consult and populate the global cache). Track the state with the highest exact min-solve steps; record the corresponding formation sequence.
+  - Use pragmatic policies to balance exploration and evaluation:
+    - Limit each random walk length (e.g., up to ~100 moves).
+    - Evaluate after every few steps or with some probability, and also at walk end.
+    - Occasionally restart a new walk from the initial state to diversify.
+    - Optionally bias move selection using a quick heuristic (e.g., number of blockers to the red car’s exit, free distance to exit) to prefer promising branches, but always use exact BFS to score.
+  - If no improvement is found within the time budget, fall back to zero formation moves and the initial puzzle’s computed min steps.
+- Output:
+  - First line: two integers separated by a single space: min_steps_to_solve_new_puzzle steps_to_form_new_puzzle
+  - Then print exactly steps_to_form_new_puzzle lines. Each line: "vehicle_id direction", where direction is one of U, D, L, R.
+  - No extra output, spaces, or blank lines.
+- Implementation tips:
+  - Fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).
+  - Use 64-bit state packing with 4 bits per vehicle (supports up to 10 vehicles comfortably).
+  - Robust hashing (e.g., splitmix64).
+  - Reuse temporary buffers for occupancy and neighbor generation.
+  - Strictly respect solver rules, including allowing the red to move right off-board (positions 5->6) and to move back left from 6->5 in solver space (reversibility), while forbidding any off-board move during formation.
+
+Your final response must be only the C++ solution code wrapped in ```cpp ... ``` and must follow the exact output format.

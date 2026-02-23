@@ -1,0 +1,98 @@
+You are a competitive programmer. Implement a C++17 program for an offline-simulated interactive problem. Your output must be EXACTLY the C++ code wrapped in ```cpp ... ``` with no extra text. The program must adhere to the protocol, constraints, and the improved strategy below to avoid Wrong Answer and keep the number of interaction rounds competitive.
+
+Problem (interaction simulated via stdin/stdout):
+- Input:
+  - First line: two integers r, c (1 ≤ r, c ≤ 100) — grid size.
+  - Next r lines: a map of r×c characters: '.' is open, '#' is wall. At least one open cell exists. Cells outside the map are considered walls.
+  - Then, interaction proceeds in rounds. In each round, the judge prints a single integer d (0 ≤ d ≤ 99) indicating: in your current state (cell, facing), looking straight ahead there are exactly d open squares before the nearest wall. If input is -1 at any time, terminate immediately (no further output).
+- Output (one per round, then flush):
+  - "left" — rotate 90° left in place.
+  - "right" — rotate 90° right in place.
+  - "step" — move forward exactly one cell (only valid when current observed d > 0; you must never step into a wall).
+  - "yes i j" — claim your current position is row i, column j (1-based). Interaction stops.
+  - "no" — claim it is impossible to ever uniquely determine your position regardless of actions. Interaction stops.
+- After any action except "yes"/"no", a new round starts and a new d will be provided for your new state. Always flush after printing an action/answer.
+
+Goal:
+- Start in some unknown open cell in one of the 4 cardinal orientations. Using the observed distances and your chosen actions, determine your exact cell coordinates (row and column, 1-based), or conclude it is impossible. You must never step into a wall. To score well, minimize the number of interaction rounds. If your round count exceeds twice the standard solution’s count, you receive 0 points.
+
+Core modeling (finite-state Moore machine):
+- States S are all (open cell, orientation) pairs: 4 orientations per open cell. With r,c ≤ 100, ≤ 10,000 open cells → ≤ 40,000 states.
+- For each state s:
+  - Output λ(s) = distance to the next wall looking forward (0..99), computed from the static map (outside grid is a wall).
+  - Transitions:
+    - L(s): same cell, orientation rotated left (0..3 wrap).
+    - R(s): same cell, orientation rotated right.
+    - F(s): move forward one cell keeping orientation; undefined if λ(s) = 0 (must never step into a wall).
+- Precompute for each state:
+  - λ(s) by straight-line scan until a wall/outside.
+  - L(s), R(s) in O(1).
+  - F(s) is next-cell same orientation if λ(s) > 0, else mark invalid (-1).
+
+Myhill–Nerode/Behavioral equivalence (provable impossibility):
+- Compute the coarsest behavioral equivalence (bisimulation for this Moore machine) via iterative partition refinement:
+  - Initialize classes by λ(s).
+  - Iteratively refine using the tuple T(s) = (λ(s), class(L(s)), class(R(s)), class(F(s))) where class(F(s)) = -1 if F(s) is invalid. Use an unordered_map from tuple → new class id. Repeat until stable.
+  - Two states are equivalent iff they yield identical output now and, for each of actions {L,R,F}, their successors are also equivalent (with F treated as invalid when λ=0). This guarantees that no adaptive policy (choosing actions based on previously observed outputs) can distinguish them.
+- Important correctness rule:
+  - At any round after filtering by the observed d, if all remaining candidate states A lie within a single minimized equivalence class but occupy more than one distinct cell (ignoring orientation), then it is impossible to ever uniquely determine your position. In that case output "no" immediately. This is a mathematically sound early stop; implement the refinement carefully to avoid false "no".
+
+Interaction loop (policy with competitive step count):
+- Maintain the current candidate set A ⊆ S of possible states (initially all open-cell orientations).
+- Each round:
+  1) Read integer d. If d == -1, exit immediately.
+  2) Filter A := { s ∈ A | λ(s) == d }. If A becomes empty, print "no" and exit.
+  3) If all states in A occupy the same cell (ignoring orientation), print "yes i j" (1-based) and exit.
+  4) If all states in A belong to the same minimized equivalence class and the cells are not all identical, print "no" and exit (provably impossible to distinguish further).
+  5) Choose next action among allowed actions:
+     - Allowed actions always include "left" and "right".
+     - "step" is allowed only if current observed d > 0 (so F(s) is valid for all s ∈ A after the filter).
+     Robust deterministic scoring (improves over naïve λ-histogram and avoids cycles):
+       • For each allowed action a ∈ {L, R, (F if d>0)}, let A' = { a(s) | s ∈ A } (deduplicate).
+       • Compute the multiset of next outputs over A': for each possible d' value, define B_{a,d'} = { t ∈ A' | λ(t) = d' }.
+       • 1-ply metrics for action a:
+           - m1(a) = max over d' of |B_{a,d'}|  (minimize worst-case candidate size right after next observation).
+           - m2(a) = max over d' of (largest frequency of minimized-class id among states in B_{a,d'})  (anticipates how many will still be behaviorally indistinguishable even with perfect future play).
+           - m3(a) = sum over d' of |B_{a,d'}|^2  (dispersion tie-breaker).
+       • Optional but recommended 2-ply lookahead (better step count and avoids pathological loops):
+           - For each non-empty B_{a,d'}, consider the set of allowed second actions (if d'==0: only turns; else: turns and step). For each such second action b, form C_{a,d',b} = { b(t) | t ∈ B_{a,d'} } and compute n1(b) = max over d'' of |{ u ∈ C_{a,d',b} | λ(u)=d'' }|.
+           - Define L1(a) = max over d' of ( min over b allowed at B_{a,d'} of n1(b) ). This is a 2-step minimax of next worst-case bucket size.
+         Scoring order:
+           - Primary: minimize L1(a) if 2-ply was computed; otherwise minimize m1(a).
+           - Secondary: minimize m1(a) (if 2-ply used), then minimize m2(a).
+           - Tertiary: minimize m3(a).
+           - Final deterministic tie-breaker: prefer turns over step (turns typically disambiguate faster without risking forward commitment); among turns, prefer "left" over "right".
+       • Output the chosen action and flush. Update A := A' of that action.
+     - Cycle avoidance: Maintain a small LRU cache (e.g., last 8) of hashes of candidate sets A. If the best-scored action would produce an A' whose hash matches any recent one, and there exists another action with equal primary/secondary scores that avoids such a repeat, choose that alternative. This prevents getting stuck in loops on symmetric maps and keeps the round count competitive.
+
+Implementation details and safety:
+- Grid parsing: map open cells to compact indices 0..(numOpen-1). A state id is (cellId*4 + dir), dir ∈ {0:up,1:right,2:down,3:left}.
+- Precompute λ(s) by scanning along direction until a wall/outside is hit (treat outside as wall). Precompute L,R,F transitions; F = -1 if λ=0.
+- Partition refinement:
+  - Initialize cls[i] = λ[i].
+  - Iterate until stable: for each state i, build tuple (λ[i], cls[L[i]], cls[R[i]], (F[i]==-1?-1:cls[F[i]])). Map tuples to new class ids. Repeat with newCls until no change.
+  - Use an unordered_map with a robust hash for small tuples; handle -1 for invalid F distinctly.
+- Candidate set A: store as a vector<int> of state ids, deduplicate when applying actions. Use a visited-stamp array for O(1) deduplication per image.
+- Hashing candidate sets for cycle avoidance: compute a 64-bit Zobrist-style hash by xoring pre-generated random numbers per state id, or a rolling mix over state ids.
+- allSameCell(A): check if all s in A have the same (state/4) cell id; if true, output "yes row col", with 1-based indices.
+- Never output "step" when current observed d == 0.
+- If the input is -1 at any time, terminate immediately without printing anything.
+- I/O: use fast I/O; after printing any action/answer line, immediately flush.
+
+Output requirement:
+- The program must output only valid commands required by the protocol.
+- After printing "yes ..." or "no", terminate without reading further input.
+- The final submission must be a single C++17 source code wrapped in:
+  ```cpp
+  // code
+  ```
+  with no extra text before or after.
+
+Performance:
+- r,c ≤ 100; ≤ 40k states. Straightforward O(rc·4·maxDistance) ray casting is fine. Partition refinement over 3 outgoing transitions per state is fast within 15s/1GB.
+- The per-round action scoring (including optional 2-ply) runs on current A only and is efficient in practice.
+
+Correctness priorities to avoid WA (based on known pitfalls):
+- Strictly prevent "step" when d == 0.
+- Ensure partition refinement is implemented correctly; the "no" decision must only be made if all candidates lie in one minimized class and occupy multiple cells.
+- Prefer turns over "step" in tie-breaking to avoid long aimless walks; use 1–2 ply lookahead and cycle avoidance to keep the round count within 2× of the standard solution on adversarial/symmetric maps.

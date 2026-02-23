@@ -1,0 +1,97 @@
+You are to write a robust, fully deterministic C++17 program for a competitive-programming scoring problem. The goal is to deterministically generate exactly 10 range-add operations to apply to an input array and then report the length of the strictly increasing LIS of the final array after applying those exact 10 operations. Correctness and exact output format are non-negotiable. Heuristics are for scoring only; if correctness checks fail (e.g., mismatch with the real LIS of the array after your printed operations), the submission will be rejected.
+
+Absolute must-follow output and format rules:
+- Your response must ONLY contain the complete C++17 source code inside a single ```cpp ... ``` block — no extra commentary, no prose, no additional markdown other than that one cpp block.
+- The program must compile with GNU++17, use fast I/O, and run in O(n log n) or better for n up to 200,000.
+- Use 64-bit integers (long long) for all numeric values everywhere: array elements, differences, prefix sums, LIS tails, and operation parameters (l, r, d). It is fine to keep n as int for indices, but all arithmetic for values and d must be in long long. For safety and to avoid subtle bugs, store l and r inside the op struct as long long too (even though they fit in int).
+- Output exactly 11 lines:
+  - Line 1: a single integer — the length of the strictly increasing LIS of the array AFTER applying the printed 10 operations.
+  - Lines 2..11: the 10 operations, each as "l r d" with 1 ≤ l ≤ r ≤ n and -x ≤ d ≤ x.
+- Do not print extra spaces (only single spaces between integers), no trailing spaces, no blank lines, and no debug text. Exactly 11 lines only.
+- Use 1-based indices for all operations.
+- Always print exactly 10 operations; if you have fewer, pad with "1 1 0" to reach 10.
+
+Input specification (implement exactly this):
+- First line: two integers n and x (1 ≤ n ≤ 200000, 0 ≤ x ≤ 1e9).
+- Second line: n integers t[1..n] (1 ≤ t[i] ≤ 1e9).
+
+Operation model:
+- You must print exactly 10 operations. Each operation chooses a non-empty interval [l, r] and an integer d with -x ≤ d ≤ x, and adds d to all t[l..r]. d may be 0.
+- The judge reconstructs the final array by applying your printed 10 operations in order, starting from t[], and checks that the LIS length you printed equals the LIS of that final array. Any mismatch or invalid operation causes Wrong Answer.
+
+Core correctness requirements (non-negotiable):
+- Strictly increasing LIS computation must use patience sorting with lower_bound (i.e., replace the first element ≥ v). Do NOT use upper_bound. Tails array must be long long.
+- Apply all 10 range additions using a difference array in O(n + ops):
+  - Allocate diff of size at least n+2, initialized to 0 (type long long).
+  - For each op [l, r, d] (1-based, inclusive): diff[l] += d; if (r < n) diff[r+1] -= d; (d may be 0).
+  - Build the modified array via prefix sums with 1-based traversal: cur += diff[i]; a[i] = t[i] + cur for i = 1..n. Internally you may store a[i-1] in a 0-based vector, but be consistent. All arithmetic must be long long.
+- Normalize every operation before evaluation and before printing (this is mandatory; the judge will not normalize for you):
+  - Clip l and r into [1, n]; if l > r, swap them.
+  - Clip d to the integer range [-x, x]; if x == 0 then d must be 0.
+  - Ensure intervals are non-empty (l ≤ r).
+- After selecting your 10 operations (normalized and padded/truncated to exactly 10), recompute the final array using the difference array and recompute the strictly increasing LIS (using lower_bound) on that exact final array. Print that LIS and then print exactly those same 10 operations, in the same order, with the same values. Do not alter operations between recomputation and printing.
+
+Edge cases (handle explicitly and safely):
+- If n == 1: the LIS is always 1 after any operations. Still print exactly 10 operations; pad with "1 1 0" if needed.
+- If x == 0: all operations must have d = 0; the LIS equals that of the original array. Still print exactly 10 operations with d = 0.
+- For small n (including n < 10), intervals must remain valid (l ≤ r). Indices/intervals may repeat. Always normalize and pad to 10 ops.
+- Ensure all arithmetic on values, diffs, d, and LIS tails uses long long; indices for arrays can be int but must be range-checked. Store l, r, d as long long in the op structure to avoid any promotion pitfalls.
+
+Determinism and randomness:
+- Any randomness for candidate generation must be deterministically seeded using only input-derived values (n, x, and a deterministic hash of t[]). Do NOT use time-based seeds or non-deterministic sources.
+- Recommended deterministic RNG: SplitMix64. Build a 64-bit seed from n, x, and a simple rolling/mixed hash over t[] and indices. A standard approach is to start from a fixed constant, then for each i incorporate (t[i] and i) via a SplitMix64-style mix (e.g., splitmix64_one((t[i] << 1) ^ i) xor-accumulated). Keep the seeding and RNG purely deterministic across runs for identical inputs.
+- For generating a random integer uniformly in [0, bound-1], use the high 64 bits of the 128-bit product of next_u64() and bound (i.e., multiply-high method) to avoid modulo bias; do not use std::uniform_int_distribution nor modulo.
+
+Heuristic strategy (scoring; generate and evaluate multiple candidates deterministically):
+- You are not required to find the optimal LIS; you are scored by the LIS you achieve. However, correctness (printed LIS must equal the LIS of your final array) is top priority. The judge will mark Wrong Answer if they recompute LIS of your printed operations and it differs from what you printed, even if your operations are valid.
+- Implement a deterministic multi-candidate search. For each candidate:
+  1) Generate a vector of up to 10 operations (may be fewer).
+  2) Normalize each op (clip l, r to [1,n]; ensure l ≤ r; clip d to [-x, x]).
+  3) Pad with "1 1 0" to reach exactly 10 operations; if more than 10, truncate to 10.
+  4) Apply via the difference array exactly as specified and compute LIS with lower_bound using long long throughout.
+  5) Keep the best by LIS length; in case of ties, you may keep the first or use a deterministic secondary rule (e.g., lexicographically smallest operations).
+- Include at least these candidates (all must adhere to normalization rules; ensure all l,r are valid and intervals non-empty even for small n):
+  1) Baseline safety: 10 no-ops "1 1 0". (Crucial when x = 0 or degenerate cases.)
+  2) Suffix ramp/stairs: choose 10 positions p1 < p2 < ... < p10 (evenly spaced quantiles over [1..n]); for each i, add [pi, n] with d = +x.
+  3) Fix biggest drops: let s[j] = t[j] - t[j-1] for j = 2..n; take up to 10 indices with most negative s[j] (largest drops), sort them increasingly, and add [j, n] with d = +x; if fewer than 10, fill with evenly spaced suffix +x ops.
+  4) Mixed spread: 5 prefix decreases and 5 suffix increases to widen separation:
+     - For five evenly spaced q_i: [1, q_i] with d = -x.
+     - For five evenly spaced p_i: [p_i, n] with d = +x.
+  5) Segmented blocks: partition [1..n] into 10 contiguous blocks with L_i = floor(i*n/10)+1 and R_i = floor((i+1)*n/10), for i = 0..9; apply -x on the first 5 blocks and +x on the last 5; normalize endpoints so L ≤ R and within [1..n].
+  6) Alternating stairs: for 10 evenly spaced pivots r_i = floor((i+1)*n/10) clamped to [1,n], alternate [1, r_i] with d = -x and [r_i, n] with d = +x.
+  7) Paired around big drops: for up to 5 worst drops, push two ops per drop: [1, j-1] with d = -x (clip j-1 to ≥1) and [j, n] with d = +x; if fewer than 5 drops, fill deterministically with quantile-based pairs to total 10 ops.
+  8) Random variant 1 (deterministic): for each of 10 ops, randomly (with deterministic SplitMix64) pick either a prefix [1, r] with d = -x or a suffix [l, n] with d = +x.
+  9) Random variant 2 (deterministic): for each of 10 ops, pick a random interval [l, r] (1 ≤ l ≤ r ≤ n) and a random d in [-x, x] (d = 0 if x = 0).
+- You may add additional deterministic variants if desired (e.g., center-focused blocks, alternating mid-intervals), but keep total time O(n log n).
+
+Implementation checklist and pitfalls to avoid:
+- Fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Use long long for values and operation parameters everywhere; casts to int are only for safe indexing into vectors sized with n. Prefer storing l, r, d in the Op struct as long long to avoid any accidental narrowing or UB.
+- Keep the input array in a 1-based vector t[1..n] (size n+1) or a 0-based vector a[0..n-1]; be consistent. If 1-based, always access t[i] for i=1..n. If 0-based, carefully convert op indices when applying the diff.
+- Pre-allocate/reserve where reasonable (e.g., tails.reserve(n) for LIS).
+- Difference array size at least n+2. When applying diff: only do diff[r+1] -= d if r < n. Build prefix from i=1..n inclusive with 1-based logic and write to a[i-1] (if using a 0-based vector to store the final array).
+- Indices are 1..n inclusive. Be careful with off-by-one when quantiling or block partitioning; ensure every generated interval is normalized and non-empty.
+- Determinism: seed SplitMix64 with a seed composed from n, x, and a mixed hash over t[] and indices. Never use time-based randomness or std::random_device.
+- Strictly increasing LIS uses lower_bound (first ≥ v) on the tails vector; never use upper_bound. Tails must be long long to avoid overflow/precision bugs.
+- Always normalize and pad to exactly 10 ops for every candidate before evaluation. Re-normalize the final chosen set, re-apply via the difference array, and recompute LIS immediately before printing to guarantee the printed LIS equals the result of your printed operations. Do not mutate operations after this recomputation.
+- Optional internal safety (recommended): for very small n (e.g., n ≤ 2000), compute an O(n^2) DP LIS as a sanity check against the patience result (using strictly increasing condition). If a mismatch is detected, fall back to the safest candidate (e.g., 10 zero-ops) to avoid Wrong Answer. This must not affect asymptotics on large n (guard it by n threshold).
+- Tie-breaking among candidates must be deterministic (e.g., keep the first best or choose lexicographically smallest ops vector).
+
+Final step (mandatory):
+- Select the best candidate by LIS length on the exact final array produced by its normalized, padded 10 operations.
+- Immediately re-normalize, re-apply via the difference array, and recompute the strictly increasing LIS with lower_bound using those exact 10 operations.
+- Print:
+  - Line 1: that LIS length as a single integer
+  - Lines 2..11: exactly those 10 operations (l r d), in the same order, with the same values.
+- Do not alter operations between recomputation and printing.
+- Print exactly 11 lines, no extra blank lines, no trailing spaces. A final trailing newline at the end of the last line is acceptable, but there must not be any extra empty line.
+
+Notes from prior attempts and pitfalls to avoid (must address explicitly):
+- Ensure all arrays involved in difference application and LIS are long long where values are stored/compared.
+- Ensure normalization is applied to every candidate before evaluation and again to the final chosen ops before final recomputation and printing.
+- Be careful with 1-based vs 0-based indexing when building the modified array; prior mistakes in this area lead to LIS mismatches.
+- Ensure deterministic seeding only from (n, x, t[]) using SplitMix64; do not use nondeterministic sources.
+- Always guard r+1 when updating the diff array: only subtract at r+1 if r < n.
+- Keep the number of candidates modest and O(n log n) total time; avoid any inadvertent quadratic behavior on n up to 200,000.
+
+Your final message must contain only the C++17 source code inside a single ```cpp ... ``` block, following all the above requirements.

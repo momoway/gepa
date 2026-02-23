@@ -1,0 +1,164 @@
+You are a competitive programming assistant. Implement a C++17 solution for the following specific problem (Max-2-SAT), adhering to strict I/O and performance requirements. The program must be deterministic, robust, and finish within tight time limits for n ≤ 1000 and m ≤ 40000.
+
+Task summary:
+- You are given a Boolean CNF formula in which each clause has exactly two literals.
+- Variables are x1..xn. A positive integer k refers to literal xk, a negative integer -k refers to literal ¬xk.
+- Each clause is of the form (a ∨ b) for given integers a, b in [-n, n] \ {0}.
+- Your goal is to output a truth assignment that maximizes the number of satisfied clauses. On many judges, partial satisfaction may be scored but still labeled “Wrong Answer” if s < m; to avoid this, bias toward quickly finding a fully satisfying assignment when it exists.
+
+Input format:
+- Line 1: two integers n and m
+  - 1 ≤ n ≤ 1000
+  - 0 ≤ m ≤ 40000
+- Next m lines: two integers a b, each in [-n, n] and non-zero
+  - Each line defines a clause (a ∨ b)
+
+Output format:
+- Exactly one line with n integers: x1 x2 … xn, each in {0, 1}
+  - 1 means TRUE, 0 means FALSE
+  - Space-separated, followed by a newline
+- If m = 0, output any valid assignment (e.g., all zeros)
+
+Scoring:
+- Let s be the number of satisfied clauses.
+- If m > 0: score = s / m; if m = 0: score = 1.
+- Any assignment is accepted and scored, but many judges still report WA unless all clauses are satisfied; aim to find s = m whenever possible.
+
+Critical implementation requirements:
+- Output must contain only the C++ code, wrapped in ```cpp ... ``` with no additional text.
+- Use fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).
+- Avoid any extra prints (no debug logs).
+- Respect execution time and memory limits; target near-linear or O((n + m) log n) behavior per run and cap iterations/work accordingly.
+- Ensure determinism: use a fixed-seed RNG (do not seed from time); all restarts and tie-breakers must be deterministic under the fixed seed.
+- Do NOT depend on wall-clock timing to decide when to stop; rely on fixed iteration caps to preserve determinism across environments.
+
+Edge cases to handle robustly:
+- m = 0
+- Clauses where both literals refer to the same variable (including both with same polarity (x ∨ x) or opposite polarity (x ∨ ¬x))
+- Variables appearing multiple times and with mixed polarity
+- Duplicate clauses
+- Ensure O(1) add/remove in the unsatisfied set with no duplicates.
+
+Recommended algorithmic strategy (Weighted GSAT/WalkSAT hybrid with noise, clause weighting (PAWS-style), and restarts):
+- Data layout:
+  - Clause struct:
+    - v0, v1: 1-based variable indices
+    - p0, p1: booleans indicating positive polarity (true if literal is xi, false if ¬xi)
+    - mask: an unsigned char (2-bit) representing current literal truths:
+      - bit 0 corresponds to first literal’s truth
+      - bit 1 corresponds to second literal’s truth
+      - mask != 0 means the clause is currently satisfied
+    - ucnt: number of unique variables in the clause (1 or 2)
+    - uvar[2]: the unique variables
+    - ubits[2]: the bits they control in mask (1, 2, or 3)
+  - Adjacency list mapping each variable to its incident clauses:
+    - For each appearance of variable x in clause c:
+      - If x appears in both slots, a single entry (cid, bits=3)
+      - Else (cid, bits=1) or (cid, bits=2) depending on which literal position x controls
+  - Clause weights (uint16_t), initially 1 for all clauses; capped (e.g., at 4096) to avoid overflow.
+  - Per-variable weighted gain:
+    - gain[x] = sum over Adj entries ( weight[c] * contrib(clauses[c].mask, bits_x_in_c) )
+
+- Bitmask helpers (crucial for speed and correctness):
+  - satMask(mask): returns 1 if the clause is satisfied (mask != 0), else 0.
+  - contrib(mask, varBits): returns the change in the number of satisfied clauses if we flip the variable that controls varBits in this clause, assuming only this clause’s literals affected by that variable flip:
+    - newMask = mask ^ varBits
+    - return satMask(newMask) - satMask(mask)
+  - These definitions work for all cases, including clauses where the same variable appears twice with same or opposite polarity.
+
+- Initialization:
+  - Heuristic assignment:
+    - For each variable i, set xi = 1 if posCount[i] ≥ negCount[i], else 0; break exact ties randomly but deterministically using the fixed RNG.
+  - Compute initial clause masks from the assignment:
+    - For clause c with literals (v0, p0) and (v1, p1):
+      - bit0 = p0 ? assign[v0] : 1 - assign[v0]
+      - bit1 = p1 ? assign[v1] : 1 - assign[v1]
+      - mask = (bit0 ? 1 : 0) | (bit1 ? 2 : 0)
+  - Build the unsatisfied list:
+    - Maintain vector<int> unsat and vector<int> where(m, -1) for O(1) add/remove of unsatisfied clauses.
+  - Compute initial weighted gains:
+    - gain[x] = sum over Adj entries ( weight[c] * contrib(mask[c], bits) ), with weight[c] initially 1.
+
+- Clause weighting (to escape plateaus and improve chances of full satisfaction):
+  - Maintain a counter since last improvement in satisfied clause count (no_improve_steps).
+  - If no global best improvement for plateauWindow flips (e.g., plateauWindow = clamp(m/20, 500, 3000)), then:
+    - For every currently unsatisfied clause c:
+      - if (weight[c] < WEIGHT_CAP) weight[c]++
+      - For each variable y in c (use c.ucnt, c.uvar[], c.ubits[]):
+        - deltaGain = contrib(mask[c], ubits[y])  // in {-1,0,1}
+        - gain[y] += deltaGain  // because weight increased by exactly 1
+        - Push updated (gain[y], -y) into the heap (lazy refresh)
+    - Reset no_improve_steps = 0.
+  - Choose WEIGHT_CAP, e.g., 4096. Gains can be kept in 32-bit signed int safely.
+
+- Move selection (iterative local search):
+  - Maintain a lazy max-heap (priority_queue<pair<int,int>>) over (gain, -variable) so smaller variable id wins ties deterministically.
+  - Noise and focus:
+    - With probability pNoise (e.g., 0.35), pick a random unsatisfied clause and choose the variable among its (up to) two literals with the higher current weighted gain (break ties deterministically using RNG). If the clause has the same variable twice, choose that variable.
+    - Otherwise, select the variable with maximum weighted gain from the max-heap (using lazy invalidation: pop until the top matches the current gain).
+  - Flip the chosen variable x and update incrementally:
+    - Toggle assign[x].
+    - For each Adj (cid, bits) of x:
+      - oldMask = clauses[cid].mask
+      - newMask = oldMask ^ bits
+      - Update global satisfied count by satMask(newMask) - satMask(oldMask).
+      - Update unsat list:
+        - If oldMask == 0 and newMask != 0: remove cid from unsat
+        - If oldMask != 0 and newMask == 0: add cid to unsat
+      - Set clauses[cid].mask = newMask
+      - For each variable y that appears in clause cid (iterate cl.ucnt entries):
+        - Compute deltaGain = weight[cid] * ( contrib(newMask, bits_y) - contrib(oldMask, bits_y) )
+        - gain[y] += deltaGain
+        - Push (gain[y], -y) into the heap (lazy refresh)
+    - Track the best assignment seen (by satisfied count) and stop early if satisfied == m.
+    - Increment no_improve_steps if no new global best, else reset it to 0.
+
+- Restarts:
+  - Use several restarts (e.g., RESTARTS = 6–8). Restart 0 uses the majority heuristic; subsequent restarts use random initialization (fixed-seed RNG). Keep the best overall assignment across restarts.
+
+- Time/iteration control:
+  - Set an iteration cap that scales with m (e.g., MAX_FLIPS = clamp(15*m, 120000, 1000000)) per restart.
+  - Do not rely on wall-clock time to stop (to preserve determinism across machines).
+  - Ensure the algorithm always terminates deterministically within the cap even on hard instances.
+
+- Determinism and robustness:
+  - Use a fixed, high-quality 64-bit RNG (e.g., SplitMix64) with a fixed compile-time seed to make runs repeatable.
+  - All random choices (initialization, tie-breaking, noise clause/variable selection) must draw from this RNG.
+  - Avoid floating-point RNG decisions; use integer comparisons (e.g., rng % NOISE_DEN < NOISE_NUM) with fixed numerators/denominators.
+
+- Memory and performance:
+  - Preallocate vectors and reserve capacities where possible (clauses, adj, unsat).
+  - Use small integral types for masks/bits (unsigned char) and compact structs to reduce cache misses.
+  - All updates must be O(1) amortized per affected clause; overall per-flip work is proportional to the degree of the flipped variable.
+  - Carefully handle clauses where the same variable appears twice:
+    - If same polarity (x ∨ x): bits_y = 3; flipping x toggles both bits; clause flips between satisfied and unsatisfied; contrib handles this.
+    - If opposite polarity (x ∨ ¬x): bits_y = 3; mask is 1 or 2 (always satisfied); flipping x toggles to the other nonzero mask; contrib = 0.
+  - Duplicated clauses should be treated independently; weighting naturally handles duplicates by allowing multiple identical unsatisfied clauses to increase pressure on their variables.
+
+Implementation checklist:
+- Fast I/O enabled.
+- Fixed-seed RNG implemented (e.g., SplitMix64 with a hard-coded constant seed).
+- Data structures:
+  - Clause struct with v0, v1, p0, p1, mask, ucnt, uvar[2], ubits[2].
+  - Adjacency list with entries (cid, bits ∈ {1,2,3}).
+  - weight[m] as uint16_t (cap at 4096).
+  - gain[n+1] as int.
+  - unsat list with where[] index map.
+  - lazy max-heap priority_queue<pair<int,int>> over (gain, -var).
+- Helper functions:
+  - satMask(mask), contrib(mask, bits)
+  - add_unsat(cid), remove_unsat(cid)
+  - compute_mask(clause, assign)
+  - flip_var(x) that updates assign, masks, satisfied count, unsat set, gains, and pushes refreshed heap entries.
+  - plateau bump that increments weights of current unsatisfied clauses and updates gains accordingly.
+- Parameters (deterministic constants):
+  - RESTARTS ≈ 6–8
+  - NOISE fraction ≈ 0.33–0.37 using integer ratio (e.g., 35/100)
+  - MAX_FLIPS per restart = clamp(15*m, 120000, 1000000)
+  - plateauWindow = clamp(m/20, 500, 3000)
+  - WEIGHT_CAP = 4096
+- Always track and finally print the best assignment found (not necessarily the last one).
+- Ensure the output format is exact: print exactly n integers (0 or 1), separated by single spaces, ending with a single newline, with no extra whitespace or lines.
+
+Deliverable:
+- Return only the C++ code, wrapped in ```cpp ... ``` with no additional text.

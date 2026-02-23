@@ -1,0 +1,63 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. The execution time and memory limit are also stated, so choose algorithms and data structures accordingly. Your response must ONLY contain the C++ code wrapped in ```cpp and ```, with no extra explanations or text.
+
+Task summary (Permutation (Modified Version)):
+- You are given q queries; each query contains an integer k (2 ≤ k ≤ 10^18).
+- For each k, you must output a permutation p of {0, 1, …, n−1} such that the total number of increasing subsequences in p (including the empty subsequence) is exactly k.
+- You must also output n, the permutation length, before the permutation.
+- Scoring is based on the maximum n used across all queries:
+  - If max n ≤ 90 → full score (100).
+  - If 90 < max n < 2000 → partial points (linear penalty).
+  - If max n ≥ 2000 → score 0.
+- Time Limit: 5s, Memory Limit: 1024 MB.
+
+Key combinatorial facts to use:
+- Let C(π) denote the number of increasing subsequences (including empty) of permutation π.
+- A decreasing block of length t (i.e., t elements arranged in strictly decreasing order) has C = t + 1 (choose none or exactly one element).
+- Direct sum of permutations (π ⊕ σ): all elements of π are smaller than all of σ, and π’s positions precede σ’s positions.
+  - C(π ⊕ σ) = C(π) · C(σ).
+- Skew sum (π ⊖ σ): all elements of π are larger than all of σ, and π’s positions precede σ’s positions.
+  - C(π ⊖ σ) = C(π) + C(σ) − 1.
+- These two operations let you construct any k ≥ 2 starting from base permutation [0] which has C=2:
+  - Multiply by r: direct sum with a decreasing block of size r−1 (cost: add r−1 new elements).
+  - Add t: skew sum with a decreasing block of size t (cost: add t new elements).
+
+Robust constructive strategy:
+- Work backwards from k to 2 and record operations to apply later in reverse.
+- Use only small multipliers r ∈ {2, 3} to keep the length low:
+  - If k % 3 == 0: record “Mul 3”, set k = k / 3.
+  - Else: let d = k % 2 (so d ∈ {0, 1}); if d > 0, record “Add d”, set k = k − d; then record “Mul 2”, set k = k / 2.
+- Repeat until k == 2.
+- This greedily prefers division by 3 when available (no addition cost), otherwise uses division by 2 (with at most +1 addition to make it divisible), ensuring n stays small and well below 2000 for all k ≤ 1e18, and typically under 90 on most inputs.
+
+Applying recorded operations to build the permutation:
+- Start with permutation p = [0] (C=2).
+- Replay recorded operations in reverse (from first recorded to last) to build the final permutation:
+  - Add t: perform π := π ⊖ δ_t, where δ_t is a decreasing block of length t.
+    - Implementation:
+      - Create a block B of size t with values 0..t-1 and place them in decreasing order.
+      - Increase every value in π by t.
+      - Concatenate π || B (π first, then B). This maintains that every element of π is larger than every element of B, with π preceding B.
+  - Mul 2: perform π := π ⊕ δ_1 (append a decreasing block of size 1, i.e., one new largest element).
+    - Implementation:
+      - Append one element with value current_size.
+  - Mul 3: perform π := π ⊕ δ_2 (append a decreasing block of size 2).
+    - Implementation:
+      - Append two new elements with values current_size+1, current_size, in this order (so the appended block is decreasing).
+
+Output format:
+- For each query:
+  - Print integer n (= current permutation size).
+  - Next line: print the n integers of the permutation (0-based, all distinct, exactly 0..n−1, in the constructed order).
+
+Implementation details:
+- Use 64-bit integers (unsigned long long or __int128 for intermediate safety) for k.
+- Ensure you never print extra text or debugging output.
+- The final permutation must be exactly a permutation of 0..n−1.
+- The algorithm above runs in O(n) per query where n is the produced length (typically well under a few hundred), safe for q ≤ 100 and time/memory limits.
+
+Edge cases:
+- If initial k == 2: output n=1 and permutation [0].
+- Add t with t == 0 should be skipped (no-op).
+- Keep careful order when applying sums to maintain correctness of value ranges and stability of 0..n−1 mapping.
+
+Your response must be only valid C++17 code within ```cpp and ``` and must strictly follow the described construction and format.

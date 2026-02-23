@@ -1,0 +1,66 @@
+You are a competitive programmer. Implement a single self-contained C++17 program that reads the exact input of AtCoder Heuristic Contest 028 (Kakizome Taikai) from standard input and outputs only the sequence of operations (coordinates) to standard output. Do not print any extra text, counts, or blank lines.
+
+Task summary and domain specifics:
+- N = 15, M = 200 (fixed by problem).
+- The grid A is N x N with uppercase letters A-Z. Every uppercase letter appears at least once in the grid.
+- Start position is (si, sj) (0-based).
+- There are M distinct strings t_k (k = 1..M), each of length 5, uppercase letters.
+- Operation: choose a grid cell (i, j), move the finger there, append A[i][j] to S. Cost from previous (i', j') is |i - i'| + |j - j'| + 1. Staying in place costs 1.
+- Goal: type a string S that contains all t_k as contiguous substrings (“lucky string”). You must perform at most 5000 operations. Output exactly one line per operation: "i j" (0-based).
+- Scoring: If K = M (S contains all t_k), score is max(10000 - total cost, 1001). If K < M, partial score based on K, but exceeding 5000 operations or going outside the grid is WA.
+
+Input format (strict):
+- Read N, M.
+- Read si, sj.
+- Read N lines of the grid A; each is length N uppercase letters (no spaces).
+- Read M lines: each is a string t_k of length 5 uppercase.
+- Coordinates are 0-based everywhere.
+
+Output format (strict):
+- Output only the sequence of coordinates (i j) for each typed character, one per line, with no leading/trailing spaces beyond the single space separator.
+- Do not print the number of operations first or any other text.
+- Ensure total lines printed <= 5000.
+- All coordinates must be within [0..N-1].
+
+Implementation strategy (robust baseline with good score and safety):
+1) Build a superstring S that contains all t_k:
+   - Precompute pairwise overlaps ov[i][j] for all i != j: the largest L in [0..4] such that the suffix of t_i of length L equals the prefix of t_j of length L. Complexity O(M^2 * 5) is fine.
+   - Choose a starting word. A solid heuristic: pick the word minimizing rarity score = freq_first_letter[t[0]] + freq_last_letter[t[4]]. Break ties by index.
+   - Greedy ordering: repeatedly append the unused word j maximizing overlap L = ov[lastWord][j] with the current suffix. Break ties deterministically (e.g., by larger sum of overlaps to remaining words or by smaller index).
+   - Construct S by starting with t[start] and, for each chosen j, appending t[j].substr(L).
+   - Hard safety: if S length would exceed 5000, stop appending before exceeding the limit. After construction, if S > 5000, resize S to 5000. Ensure S remains non-empty.
+   - This guarantees every t_k in the chosen ordering is a substring. If truncated, K < M but you must not exceed 5000 operations.
+
+2) Plan finger movements to type S with low cost:
+   - Precompute for each letter c in 'A'..'Z' a vector of all grid positions pos[c] where A[i][j] == c. It is guaranteed non-empty per letter.
+   - To keep DP fast, optionally reduce candidate positions per letter if too many. For letters with count > KMAX (e.g., KMAX = 30), keep a shortlist of up to KMAX positions closest to the center (ci = N/2, cj = N/2) by Manhattan distance. Be careful with variable scope: operate on a reference to the per-letter vector and do not refer to a variable declared inside a narrower scope later.
+   - Dynamic programming (Viterbi-style) over S:
+     - Let letters[p] = S[p] - 'A'. Candidates for S[p] are cand[letters[p]].
+     - dp[p][a] = minimal total cost to type up to index p ending at candidate index a of cand[letters[p]].
+     - Base: dp[0][a] = |x_a - si| + |y_a - sj| + 1.
+     - Transition: dp[p][a] = min over b in candidates of S[p-1]: dp[p-1][b] + |x_a - x_b| + |y_a - y_b| + 1.
+     - Store backpointers prevIdx[p][a] = argmin b.
+     - Use int for costs (safe given limits). Precompute nothing else; direct Manhattan distance is fine.
+     - Memory: store prevIdx as a vector per position p sized to the number of candidates for S[p].
+   - Reconstruct the best path by choosing the best end index at p = L-1 and following backpointers to p = 0.
+   - This DP with KMAX up to ~30 is efficient: about L * K^2 transitions (e.g., 1000 * 900).
+
+3) Output:
+   - Print exactly L = |S| lines, each "i j" for the chosen path coordinates (0-based).
+   - No extra spaces, no blank lines, no debug output.
+   - Ensure L <= 5000 (truncate S earlier if necessary).
+   - All coordinates must be inside the grid.
+
+Correctness, determinism, and safety notes:
+- Do not produce any output other than coordinates.
+- Use fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).
+- Use only C++17 standard library.
+- Avoid recursion.
+- Be precise with vector sizes and indices:
+  - prevIdx must be sized to L, and prevIdx[p] must be sized to cand[letters[p]]. Initialize prevIdx[0] to size of cand[letters[0]] with -1.
+  - When reducing candidate vectors per letter, operate on a reference to the vector (e.g., auto& v = cand[c]) before any size checks or nth_element, and do not use a variable declared in a narrower scope outside it (avoid the bug: referencing 'v' when it’s out of scope).
+- Ensure S is at least length 1. If for any reason construction would produce an empty S (should not happen), fall back to typing the starting letter at (si, sj) or any occurrence of that letter.
+
+Deliverable:
+- Output only the C++17 source code enclosed in ```cpp ... ``` with no explanations or comments outside the code block.
+- The program must compile and run within time limits, and it must not exceed 5000 output lines.

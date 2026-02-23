@@ -1,0 +1,85 @@
+You are a competitive programmer. You will be given a problem statement; implement a solution in C++17. The input is large (up to N=10,000 vertices and M=500,000 edges), with a 2.0s time limit and 512MB memory limit. The task is a heuristic optimization for Minimum Vertex Cover in an undirected graph:
+
+- Input:
+  - First line: N M (2 ≤ N ≤ 10,000, 1 ≤ M ≤ 500,000)
+  - Next M lines: edges u v (1 ≤ u, v ≤ N, u ≠ v). Multiple edges between the same pair may appear.
+- Output:
+  - Exactly N lines; line i contains 0 or 1:
+    - 1 if vertex i is selected in the cover
+    - 0 otherwise
+  - Every edge {u, v} must be covered: at least one of u or v is 1.
+
+Scoring:
+- Score = K* / K * 100, where K is number of selected vertices, K* is hidden optimum.
+- Invalid covers score 0, so always ensure validity.
+
+Your response must ONLY contain the C++ code wrapped in ```cpp and ``` with no additional explanation or text.
+
+Implementation requirements and strategy (include all of this logic in your code):
+
+1) Fast I/O and memory-conscious graph representation:
+   - Use ios::sync_with_stdio(false); cin.tie(nullptr);
+   - Store edges in vectors of pairs (int,int).
+   - Also build adjacency lists vector<vector<int>> (1-indexed).
+   - Avoid recursion (use iterative BFS/DFS).
+   - Handle multiple edges naturally; they impose the same coverage constraint.
+
+2) Always produce a valid cover:
+   - After constructing a candidate solution, verify all edges are covered; for any uncovered edge {u,v}, select the endpoint with larger original degree (tie-break deterministically).
+   - Optionally, perform a final safe pruning pass: for each selected vertex v, you can set it to 0 only if all its neighbors are currently selected (this never invalidates coverage).
+
+3) Strong baseline via exact solution on bipartite components:
+   - Decompose graph into connected components (BFS/DFS).
+   - For each component, test bipartiteness via BFS coloring.
+   - If a component is bipartite:
+     - Compute the exact minimum vertex cover using Kőnig’s theorem:
+       - Run Hopcroft–Karp maximum matching on the bipartite component (partition by BFS colors).
+       - Recover a min vertex cover from the maximum matching: starting from unmatched vertices on the left side, run alternating BFS on the directed alternating graph (unmatched edges from left to right, matched edges from right to left). Let Z be the set of reachable vertices. The min cover is (Left \ Z) ∪ (Right ∩ Z).
+     - Mark these vertices as fixed-selected; exclude them from further heuristics.
+   - This yields an optimal K for bipartite parts and greatly improves score on many instances.
+
+4) Heuristics for non-bipartite components (and as fallback):
+   Implement multiple fast heuristics and choose the best (smallest K) among them. Each heuristic should operate only on the remaining (non-bipartite) vertices and induced edges. Recommended heuristics:
+
+   a) Leaf reduction + Maximal Matching (2-approx):
+      - Work on a residual graph with active edges and residual degrees.
+      - Repeatedly apply leaf rule: if deg(v)=1 with neighbor u, select u, remove all edges incident to u, update degrees; push new leaves.
+      - After no leaves remain, build a maximal matching on the remaining active edges and select both endpoints of each matched edge.
+   
+   b) Leaf reduction + Greedy by residual degree (high-degree first):
+      - Apply the same leaf kernelization first.
+      - Maintain a max-heap (priority_queue) of vertices keyed by current residual degree (skip stale entries).
+      - While residual edges remain: pop v with largest degree; if degree>0 select v, remove its incident edges, update neighbors' degrees and push them back with updated keys.
+
+   c) Randomized edge-driven greedy:
+      - Shuffle the list of edges (use a fast RNG; e.g., splitmix64 or mt19937 seeded by steady_clock).
+      - Scan edges; if an edge {u,v} is uncovered, select the endpoint with larger current residual degree (tie-break randomly or by id), update residual degrees; continue until all edges are covered.
+      - Optionally run a few restarts with different seeds within time budget and keep the best.
+
+   For each heuristic run:
+      - Ensure validity (step 2 fix if necessary).
+      - Apply safe pruning (neighbors-all-selected rule).
+      - Record K and keep the best solution encountered.
+
+5) Integration of bipartite exact with heuristics:
+   - Build a global selected[] initialized to 0.
+   - For each bipartite component, compute exact min cover and set selected[v]=1 accordingly; mark those vertices as “frozen”.
+   - Build an induced subgraph on the remaining (non-bipartite) vertices by ignoring edges touching frozen vertices (they are already covered).
+   - Run the heuristics (4a–4c) on this induced subgraph only. Merge the best heuristic solution into the global selected[].
+   - Finally verify all original edges are covered and apply a last safe pruning pass.
+
+6) Performance considerations:
+   - Overall complexity must be near O(M log N) for greedy and O(M sqrt N) for Hopcroft–Karp across bipartite components; both are fine under 2s for M up to 5e5.
+   - Avoid per-iteration O(M) recomputation when possible. Use degree arrays and active flags.
+   - Reserve vector capacities when feasible.
+   - No recursion to avoid stack issues.
+
+7) Determinism and ties:
+   - Prefer deterministic tie-breaking (e.g., compare degrees, then vertex id). You may include a randomized heuristic (4c); keep runtime bounded (e.g., cap restarts based on a steady_clock time budget like ~1.7–1.8s total).
+   - Ensure output is reproducible enough for typical judges (seed RNG with a fixed seed or time; both are acceptable for scoring tasks, but never print the seed).
+
+8) Output formatting:
+   - Print exactly N lines, each with 0 or 1, corresponding to vertices 1..N.
+   - No extra spaces or blank lines.
+
+Wrap only the final C++17 solution code in ```cpp and ```; do not include any explanation or comments outside the code block.

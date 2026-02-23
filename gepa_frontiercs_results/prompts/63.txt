@@ -1,0 +1,136 @@
+You are a competitive programming assistant. Implement a correct, efficient C++17 solution for the interactive problem “Space Thief (JOI)”, strictly following the problem’s I/O protocol and constraints. Your response must be ONLY C++ code wrapped in ```cpp ... ``` with no extra text.
+
+Task summary (must implement exactly):
+- Interactive non-adaptive judge. You can ask up to 600 queries.
+- There are N vertices 0..N-1 and M undirected edges (U_i, V_i) with U_i < V_i; all pairs unique; the graph is connected.
+- Two distinct hidden vertices A (key) and B (treasure), A ≠ B.
+
+Protocol:
+- Query format:
+  - Print one line starting with “0” (integer zero), then a space, then M integers (each 0 or 1) separated by single spaces, in the exact input edge order:
+    • Bit 0 ⇒ allow only U_i → V_i.
+    • Bit 1 ⇒ allow only V_i → U_i.
+  - Immediately flush output (cout.flush()) and then read a single integer x ∈ {0,1}:
+    • x = 1 if B is reachable from A in the resulting directed graph,
+    • x = 0 otherwise.
+- Final guess format:
+  - Print one line: “1 A B” (integers separated by single spaces), flush, and exit immediately.
+- Never print any extra text, spaces (beyond single separators), or blank lines.
+- Never perform ANY computation between printing a query line and reading the single integer response. Print → flush → read exactly one integer x. Do not batch multiple queries without intermediate reads.
+- After the final guess, flush and terminate immediately; do not read or compute further.
+
+Constraints and limits:
+- 2 ≤ N ≤ 10,000; 1 ≤ M ≤ 15,000.
+- 0 ≤ Ui < Vi ≤ N − 1; edges are unique; the graph is connected.
+- A ≠ B.
+- Time limit ≈ 2s; memory ≈ 1024MB.
+- Ensure time and memory complexity fit within limits, pre-allocating and reusing all buffers.
+
+Robust identification strategy (bitset candidate maintenance + DAG reachability):
+- Maintain C, the set of possible ordered pairs (u, v), via per-source bitsets:
+  • curY[u] is a dynamic bitset over v = 0..N−1 indicating v is still a valid B given A = u.
+  • Always enforce A ≠ B by clearing bit u in curY[u] at all times.
+- Data layout:
+  • Let W = ceil(N / 64). Use contiguous arrays of uint64_t blocks of size N×W for bitsets (row-major). Row u starts at base + u*W.
+  • last_mask = (N % 64 == 0) ? ~0ULL : ((1ULL << (N % 64)) - 1ULL).
+  • Always apply last_mask after any operation that can set bits beyond N (after NOTs and after row updates for both R[u] and curY[u]).
+- Pre-allocate and reuse:
+  • curY: N×W blocks (candidates), initialized to all-ones then clear diagonal and mask last block.
+  • R: N×W blocks (per-query reachability; recomputed for each chosen orientation).
+  • Rtmp: N×W blocks (temporary during orientation selection).
+  • Adjacency out-lists per vertex for the currently chosen orientation:
+    - out_deg[N], out_start[N+1], next_pos[N], out_edges[M]; reuse/clear between orientations.
+  • Reuse work buffers; do not allocate per-iteration vectors unnecessarily.
+- Use 64-bit counters for totals, because |C| ≤ N*(N-1) can be up to ~1e8.
+
+I/O initialization:
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);.
+- Read exactly the full input as specified: N, M, then M lines of U_i, V_i in input order. Store this exact order for printing query bits.
+
+RNG:
+- Initialize an mt19937_64 with a robust seed:
+  seed = steady_clock::now().time_since_epoch().count()
+       ^ (uint64_t)(uintptr_t(&N))
+       ^ (uint64_t)std::random_device{}();
+- Do not use unsafe seeding tricks.
+
+Per-query orientation selection, evaluation, and processing (everything in steps a)–d) must be completed BEFORE printing; do not compute after printing until the single integer response is read):
+1) Candidate total:
+   - Compute tot = sum_u popcount(curY[u]).
+   - If tot == 1, extract the unique (A,B) and output “1 A B”, flush, and exit immediately.
+
+2) Orientation selection (aim for a near-halving split; ensure the directed graph is a DAG and the DP matches exactly what you will print):
+   - Generate multiple trial strict total orders on vertices. Start with T ≈ 6–8 random trials; if all degenerate (s1 == 0 or s1 == tot), increase T progressively up to a cap (e.g., 64). In addition to random shuffles, include some deterministic/structured orders to avoid pathological degeneracy:
+     • Natural order [0..N−1] and its reverse.
+     • Degree-sorted ascending and descending (by deg(U)+deg(V) counts).
+     • BFS orders from 2–3 different random roots (and their reverses).
+     • A few random shuffles.
+   - For each trial:
+     a) Construct order[0..N−1] (a permutation). Compute rank[v] = position in order.
+     b) Build orientation bits[0..M−1] strictly from rank:
+        - For edge i = (U_i, V_i):
+          • if rank[U_i] < rank[V_i], bits[i] = 0 (U_i → V_i);
+          • else bits[i] = 1 (V_i → U_i).
+        This guarantees a DAG with all edges pointing from lower rank to higher rank.
+     c) Build the directed adjacency out[] strictly from these bits (to guarantee consistency with what you will print). Do NOT rebuild out[] from rank rules independently; use exactly the bits[] you will print:
+        - Clear out_deg; count out-degrees from “from = (bits[i]==0 ? U[i] : V[i])”.
+        - Prefix sums to out_start; reset next_pos = out_start.
+        - Fill out_edges[next_pos[from]++] = to, where to = (bits[i]==0 ? V[i] : U[i]).
+     d) Compute reachability Rtmp[u] for this DAG using bitset DP in reverse topological order (process vertices in decreasing rank, i.e., for pos = N-1..0, u = order[pos]):
+        - Initialize all Rtmp rows to 0.
+        - For each outgoing neighbor w of u:
+          • Rtmp[u] |= Rtmp[w];
+          • Set bit w in Rtmp[u].
+        - Ensure no self reachability: clear bit u in Rtmp[u].
+        - Mask last block: Rtmp[u][W-1] &= last_mask.
+     e) Evaluate the split quality for this trial:
+        - s1 = sum_u popcount(curY[u] & Rtmp[u]).
+        - Prefer non-degenerate splits where 0 < s1 < tot and that minimize |s1 - tot/2|.
+        - Track the best trial; if all trials remain degenerate, keep the best available (minimum |s1 - tot/2|), but keep increasing T and adding more varied orders up to the cap before settling.
+
+3) Print the query:
+   - Recompute adjacency and R for the chosen best_bits/order pair to ensure exact match between what you print and what you use for candidate updates:
+     • Build_from_bits(best_bits) as above.
+     • Compute R (not Rtmp) via the same reverse-topological DP using best_order.
+   - Output exactly:
+     • “0” then a space, then M integers (0/1) separated by single spaces in the exact input edge order, then a newline.
+     • Print integers 0/1 (not characters), and do not print any trailing spaces.
+   - Flush immediately (cout.flush()).
+   - Immediately read a single integer response x ∈ {0,1}. Do not compute anything between printing and reading.
+
+4) Update candidates using the precomputed R:
+   - If x == 1: for all u, curY[u] &= R[u].
+   - If x == 0: for all u, curY[u] &= ~R[u].
+   - After each row update for u:
+     • Mask curY[u][W-1] with last_mask.
+     • Clear bit u in curY[u] to enforce A ≠ B at all times.
+   - Optionally compute new_tot = sum_u popcount(curY[u]) to early-detect uniqueness.
+
+5) Uniqueness check and termination:
+   - If the total number of candidates becomes exactly 1, extract the only (A,B):
+     • Scan rows and 64-bit blocks; use __builtin_ctzll to find the bit index quickly.
+     • Output “1 A B”, flush, and exit immediately (no further reads or computation).
+
+6) Safety fallback:
+   - Keep a query counter. If approaching the 600-query limit (e.g., after 590 queries), pick any remaining (u,v) with a set bit in curY[u], output “1 u v”, flush, and exit immediately.
+
+Correctness and performance details (must respect):
+- Always use the exact bit-to-direction mapping when printing and when building out adjacency:
+  • Bit 0 ⇒ U_i → V_i.
+  • Bit 1 ⇒ V_i → U_i.
+- The directed graph produced by bits built from a strict total order is a DAG; reverse topological DP is valid.
+- Never set self-reachability: ensure R[u] never includes u; also always clear curY[u][u].
+- Always mask the last 64-bit block after NOT operations and after any update that may affect out-of-range bits for both R[u] and curY[u].
+- Use contiguous arrays (size N×W) for all bitsets; index row u as base + u*W.
+- Use 64-bit counters for popcount totals.
+- Pre-allocate all buffers outside the main loop and reuse them; do not allocate large vectors per iteration.
+- Do not print any debug output at any time.
+
+Edge cases to handle cleanly:
+- N ≥ 2; M ≥ 1; graph connected; U_i < V_i; edges unique.
+- Even if several orientation attempts are degenerate, progressively increase T and add varied deterministic orders (natural, reversed, degree-sorted, BFS from multiple roots and their reverses) before accepting a degenerate best; this avoids no-progress queries in practice.
+- If input ends unexpectedly (EOF) when reading the response x, terminate immediately (return 0) without printing anything else.
+
+Final output constraint recap:
+- The program must output only the sequences of queries (“0” + bits) and the final guess line (“1 A B”) in the exact required format, with immediate flushing after each line, and never compute anything between printing a query and reading its single-integer response.
+- Your final answer to this prompt must be only valid C++17 code inside a single ```cpp ... ``` block implementing the above strategy robustly and safely.

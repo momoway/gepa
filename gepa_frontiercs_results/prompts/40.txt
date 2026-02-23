@@ -1,0 +1,71 @@
+You are a competitive programmer. Implement the solution in C++ and return ONLY the code, wrapped in ```cpp ... ``` with no extra commentary.
+
+This task is the interactive problem “Interactive RBS” described below. You must strictly follow the interaction protocol.
+
+Problem summary (restate the essentials you must rely on):
+- Hidden string s of length n (2 <= n <= 1000), consisting only of '(' and ')'. Guaranteed s has at least one '(' and at least one ')'.
+- Query format: choose 1 <= k <= 1000 and indices i1..ik (1-based; indices may repeat; order matters).
+  Print exactly: "0 k i1 i2 ... ik", flush, then read a single integer: f(s_{i1} s_{i2} ... s_{ik}).
+- f(t) is the number of non-empty regular bracket substrings (contiguous correct bracket substrings) in t.
+  Key base cases for length-2: f("()") = 1; f("((") = f("))") = f(")(") = 0.
+- You may ask at most 200 queries per test. When you have reconstructed s, print: "1 s" (this is NOT counted as a query), flush, and terminate.
+- The interactor is non-adaptive (s is fixed). Do not print anything else; no debug output.
+
+Critical interactive I/O rules:
+- After EVERY line you print, end with '\n' and flush (cout << '\n' << flush;).
+- Track query count and never exceed 200. If you ever exceed 200, terminate immediately without further I/O.
+
+Core robust strategy (deterministic, <= 126 queries for n <= 1000):
+We avoid unreliable “guessing” of structure and instead use a provably additive construction to batch-classify many positions per query.
+
+1) Fundamental additive primitive without needing a known '(' or ')':
+   - Fix any pivot index p (e.g., p = 1), with character xp = s[p] (unknown).
+   - For any other index j, consider the triple T(p, j) = [p, j, p]:
+     - If s[j] != xp, then f(T(p, j)) = 1 (specifically "()” appears as either positions (1,2) or (2,3)).
+     - If s[j] == xp, then f(T(p, j)) = 0.
+   - Concatenating multiple such triples back-to-back is additive: 
+     - The boundary between triples is "... p, p, ...", which is either "((" or "))", so it does not create any cross-triple regular substrings.
+     - Therefore, for any multiset of triples, f over the whole concatenation equals the sum of f of each triple independently.
+
+2) Block-wise reconstruction using weighted copies (powers of two):
+   - We want, in a single query, to classify up to B indices relative to pivot p (equal to p or different from p).
+   - For a block of up to B=8 indices j0..j{m-1} (m <= 8), assign weight w_t = 2^t to jt.
+   - Build one query as the concatenation, for each t in [0..m-1], of w_t copies of T(p, jt) = [p, jt, p].
+     - Each copy contributes 1 to f only if s[jt] != xp; thus this block’s query response equals sum_t w_t * [s[jt] != xp].
+     - Since weights are distinct powers of two and coefficients are 0/1, the response’s binary expansion gives the flags [s[jt] != xp] directly: the t-th bit is exactly that flag (no carries can occur as coefficients are <= 1).
+   - Each T(p, jt) contributes 3 indices; the total k for a full block is 3 * sum_t w_t = 3 * (2^m - 1) <= 3 * 255 = 765 (for m=8), which satisfies k <= 1000.
+   - Process all indices j != p in blocks of size at most 8. Number of queries <= ceil((n-1)/8) <= 125.
+
+3) Determine actual bracket types:
+   - After block decoding, we know for every j whether s[j] equals xp or differs from it.
+   - There must exist at least one index q with s[q] != xp (since s contains both '(' and ')').
+   - Ask one 2-length query on [p, q]:
+     - If f([p, q]) == 1, then s[p] = '(' and s[q] = ')'.
+     - Else (since they differ), s[p] = ')' and s[q] = '('.
+   - Now assign every s[j]:
+     - If j == p: use s[p] as determined above.
+     - Else if s[j] == xp: set s[j] = s[p].
+     - Else: set s[j] to the opposite bracket of s[p].
+
+4) Output:
+   - Print "1 " followed by the reconstructed string s (no spaces within s), flush, and terminate.
+
+Implementation details to follow exactly:
+- Read n (single test).
+- Implement ask(vector<int>& idx):
+  - Print "0 k idx[0] idx[1] ... idx[k-1]".
+  - Flush.
+  - Read and return the integer response.
+  - Increment and track query count; ensure it never exceeds 200.
+- Implement answer(const string& s):
+  - Print "1 " + s.
+  - Flush and exit.
+- Never print anything else. No debug output.
+
+Safety and edge cases:
+- n is up to 1000; B=8 ensures each block query has k <= 1000.
+- Total queries: at most ceil((n-1)/8) block-queries + 1 final orientation query <= 125 + 1 = 126.
+- The case where no j differs from pivot cannot occur due to the problem guarantee (both bracket types present).
+- Indices are 1-based and can repeat; order matters; strictly adhere to the protocol.
+
+Return only the C++ code as requested, wrapped in ```cpp ... ```.

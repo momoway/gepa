@@ -1,0 +1,82 @@
+You are a competitive programmer. You will be given a problem statement; implement a solution in C++. The execution time and memory limit are tight, so pay attention to complexity. Wrap your code in ```cpp and ``` so it’s properly formatted. Your response must ONLY contain the C++ code, with no additional text.
+
+Task to solve (complete, with domain-specific nuances and pitfalls):
+
+- Input:
+  - Multiple test cases until EOF.
+  - For each test case:
+    - An integer n (3 ≤ n ≤ 2000).
+    - Then n lines describing a symmetric 0-1 matrix C of size n×n, with C[i][i] = 0 and C[i][j] = C[j][i].
+    - Each row line can be either:
+      - A contiguous string of length n consisting only of '0'/'1'; OR
+      - n space-separated integers 0/1.
+    - Across the whole input, sum of all n ≤ 2000.
+
+- Definitions:
+  - A permutation p = (p1, p2, ..., pn) induces a sequence of edge colors c1..cn where:
+    - For 1 ≤ i < n: ci = C[p_i][p_{i+1}]
+    - For i = n: cn = C[p_n][p_1] (wrap-around edge)
+  - The permutation is “almost monochromatic” iff the number of indices i with 1 ≤ i < n such that ci ≠ c_{i+1} is ≤ 1.
+    - Critically, only comparisons for i in [1..n-1] are counted; there is NO comparison of cn vs c1. This detail is crucial.
+
+- Goal:
+  - For each test case, output an almost monochromatic permutation p_1..p_n if one exists, otherwise output -1.
+  - If multiple answers exist, choose the lexicographically smallest permutation (i.e., compare arrays p1..pn in lexicographic order; equivalently minimize S = n*p1 + (n-1)*p2 + ... + 1*pn).
+
+- Key structural fact and approach:
+  - In any 2-edge-coloring of a complete graph, the vertex set can be partitioned into two disjoint monochromatic paths (Gerencsér–Gyárfás). We use a constructive greedy algorithm to build two paths:
+    - P0: 0-monochromatic path (every consecutive pair has edge color 0).
+    - P1: 1-monochromatic path.
+  - If you concatenate P0 and P1 (in either order, and choosing forward/reverse orientation of each path), you get a cyclic sequence whose c1..cn has exactly two color blocks (0-block and 1-block), with two “seam” edges between blocks (one of them is the wrap edge). Because the definition only counts comparisons c1 vs c2, …, c_{n-1} vs c_n (and not cn vs c1), by rotating the permutation so that it starts at a seam edge, at most one change is counted. Therefore, once P0 and P1 are built, there WILL exist at least one rotation of one of the 8 concatenation/orientation variants that is valid.
+
+- Construction algorithm (must be implemented correctly and efficiently):
+  - Use 1-based vertex ids.
+  - Process vertices v = 1..n in increasing order.
+  - Maintain two deques:
+    - P0: path of color 0 edges.
+    - P1: path of color 1 edges.
+  - For each v, insert as follows (preserving the monochromatic property inside each deque):
+    1) If P0 is empty: P0 = [v]; continue.
+    2) Try to append v to P0:
+       - If C[P0.back()][v] == 0, push_back v to P0 and continue.
+       - Else if C[v][P0.front()] == 0, push_front v to P0 and continue.
+    3) If P1 is empty: P1 = [v]; continue.
+    4) Try to append v to P1:
+       - If C[P1.back()][v] == 1, push_back v to P1 and continue.
+       - Else if C[v][P1.front()] == 1, push_front v to P1 and continue.
+    5) Rebalancing (hard case):
+       - Now v has the “wrong” color to both ends of P0 and also to both ends of P1 (i.e., cannot be appended to either ends of both paths).
+       - Make progress by moving exactly one endpoint u from one deque to the other so that v then fits by color, always keeping both paths internally monochromatic:
+         - Move u from P1 to the back of P0 if C[P0.back()][u] == 0 and C[u][v] == 0.
+         - Move u from P1 to the front of P0 if C[u][P0.front()] == 0 and C[v][u] == 0.
+         - Or symmetrically, move u from P0 to the back of P1 if C[P1.back()][u] == 1 and C[u][v] == 1.
+         - Or move u from P0 to the front of P1 if C[u][P1.front()] == 1 and C[v][u] == 1.
+       - Among possible moves (up to 4 endpoints × 2 directions), choose any that satisfies the conditions, perform that single move, then immediately attach v to that same end.
+       - The theorem ensures at least one such move exists, so this step will always succeed.
+    - This algorithm runs in O(n^2) worst case.
+
+- Candidate generation and crucial rotation step:
+  - After processing all vertices, you have two deques P0 and P1 that are internally monochromatic.
+  - Build 8 base candidates by:
+    - Order: P0 followed by P1, or P1 followed by P0 (2 options),
+    - Independently reversing each deque or not (2 × 2 options).
+  - For each base candidate permutation p (length n), you MUST consider all n rotations (start index shift 0..n-1), because validity (“≤1 change among i=1..n-1”) may only hold when the permutation starts at a seam edge. This rotation step is essential.
+  - For each rotation, compute c[1..n] as defined and count differences among i=1..n-1 between c[i] and c[i+1]. If count ≤ 1, it’s valid.
+  - Among all valid rotations of all 8 base candidates, choose the lexicographically smallest permutation (use standard vector lexicographic compare).
+  - If (unexpectedly) no rotation of any base candidate is valid, output -1 (this should not happen if the partition maintenance is correct).
+
+- Complexity and implementation notes:
+  - Sum of n ≤ 2000 allows O(n^2) total across all test cases; the rotation scan (8 × n rotations × O(n) per check) is safe.
+  - Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr).
+  - Robustly parse each row:
+    - Read the first token as a string.
+    - If its length is exactly n and all chars are '0'/'1', treat it as a contiguous row string.
+    - Otherwise, treat it as the first integer, convert to int (0/1), and then read n-1 more integers.
+  - Store C in a compact type (e.g., unsigned char) to save memory.
+  - No recursion.
+
+- Output:
+  - For each test case, print either:
+    - n integers p_1..p_n (1-based ids), separated by single spaces, followed by a newline; or
+    - -1 followed by a newline.
+  - Do not print any extra text.

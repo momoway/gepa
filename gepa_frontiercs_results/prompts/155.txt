@@ -1,0 +1,132 @@
+You are a competitive programmer. Implement a single C++17 program that solves an AtCoder Heuristic Contest–style robust route planning task (AHC009-like). The solution must adhere to all requirements below.
+
+Critical compile-safety note (fix from prior attempt):
+- Do NOT define a self-recursive lambda for BFS or call a lambda before type deduction. Implement BFS as a named, non-recursive function (e.g., string bfs_with_order(...)) or use std::function if recursion is truly needed (but BFS here doesn’t need recursion).
+- Do NOT perform any fallback or re-call logic inside the BFS function itself. If fallback to a default neighbor order is needed, the caller should invoke BFS again with "UDLR" (or a default) instead of recursion inside BFS.
+
+Strict I/O and output requirements:
+- Read exactly the input described below from stdin.
+- Compute a single valid route string.
+- Print exactly one line containing only characters from {U, D, L, R}, with length ≤ 200, followed by a single newline.
+- If the start equals the goal, print an empty line (just a newline) and exit immediately.
+- If input reading fails for any reason (e.g., wrong number of lines/lengths), output a blank line and exit early.
+- Wrap the entire program in one single ```cpp ... ``` code block. Do not print any extra text, comments, debug logs, or explanations outside the C++ code block.
+- Do not print any additional whitespace or extra newlines beyond the single required line.
+
+Task summary:
+- Grid: 20x20 squares, coordinates (i, j), both in [0, 19]. The outside boundary is surrounded by walls.
+- Internal walls:
+  - Horizontal walls h[i][j] for i in [0, 19], j in [0, 18]. h[i][j] == '1' means a wall blocks between (i, j) and (i, j+1); '0' means passage.
+  - Vertical walls v[i][j] for i in [0, 18], j in [0, 19]. v[i][j] == '1' means a wall blocks between (i, j) and (i+1, j); '0' means passage.
+- Start (si, sj) with si, sj in [0, 4]; Goal (ti, tj) with ti, tj in [15, 19]. All squares are reachable from the start.
+- Probability p in [0.1, 0.5]: At each turn t (1..L), with probability p the instruction is forgotten and the agent stays; with probability (1 - p) the agent attempts to move one cell in the instructed direction; if blocked by a wall or boundary, he stays. Once the goal is reached, the agent stops immediately (absorbing).
+
+Strict input format (read exactly this format from stdin):
+- Line 1: si sj ti tj p
+- Next 20 lines: h[0], h[1], ..., h[19], each a string of exactly 19 characters '0'/'1' (no spaces).
+- Next 19 lines: v[0], v[1], ..., v[18], each a string of exactly 20 characters '0'/'1' (no spaces).
+Notes:
+- Read each of the 39 subsequent lines as a single string token (std::string), not split by spaces.
+- Validate the exact string lengths (19 for each h row, 20 for each v row). If any mismatch or read failure occurs, print a single blank line and exit.
+- Do not read beyond these lines or assume any additional whitespace.
+
+Movement feasibility (build adjacency exactly as follows):
+- Flatten cells as id in [0..399], mapping i = id / 20, j = id % 20.
+- Direction mapping exactly: 0=U, 1=D, 2=L, 3=R.
+- Precompute trans[400][4]: for each id and direction, the deterministic destination if attempting that direction (neighbor id or self-loop if blocked), using:
+  - From (i, j):
+    - Up (U): allowed iff i > 0 and v[i-1][j] == '0'.
+    - Down (D): allowed iff i < 19 and v[i][j] == '0'.
+    - Left (L): allowed iff j > 0 and h[i][j-1] == '0'.
+    - Right (R): allowed iff j < 19 and h[i][j] == '0'.
+  - If a move is not allowed due to a wall or boundary, the attempt results in staying in place (self-loop).
+
+BFS pathfinder (shortest path in steps):
+- Implement a named, non-recursive BFS function, e.g., string bfs_with_order(int startId, int goalId, const string& order), that:
+  - Returns a shortest path string from start to goal, using neighbor exploration strictly in the given order string (e.g., "UDLR").
+  - Build neighbors using the precomputed trans array; skip self-loops in BFS expansion (do not enqueue the same node when trans[u][d] == u).
+  - If start == goal, return an empty string.
+  - If BFS fails (should not, since all cells are reachable), return an empty string; the caller must handle fallback by retrying with order "UDLR".
+- Important: No recursion inside BFS; no inline recursive lambdas.
+
+Direction orders to try for diversity:
+- Use at least these 16 (or include all 24 permutations for more diversity):
+  - "UDLR","ULDR","DLUR","DRUL","LURD","LRUD","RULD","RLDU",
+    "UDRL","DURL","LDRU","RDLU","URDL","ULRD","DRLU","DLRU"
+- It is recommended to include all 24 permutations to widen the base path set if time permits.
+
+Exact expected score evaluator (DP), O(400 * L) per evaluation:
+- Let cur[id] be the probability mass of being at cell id at the start of a turn, conditioned on not having arrived before (absorbing). Initialize cur[start] = 1, others 0. Always maintain cur[goal] = 0 (never propagate from goal).
+- For each step t = 1..L with instruction c_t:
+  - Map c_t to dir d in {0,1,2,3}.
+  - Zero-initialize nxt[id] for all id.
+  - For all id != goal:
+    - Let mass = cur[id]. Skip if zero.
+    - With probability p, mass stays: nxt[id] += mass * p.
+    - With probability (1 - p), mass moves to to = trans[id][d] (which may equal id if blocked): nxt[to] += mass * (1 - p).
+  - Let arrive = nxt[goal]. Add (401 - t) * arrive to the expected score.
+  - Absorb arrivals: set nxt[goal] = 0.
+  - Set cur = nxt for next iteration.
+- Use double for probabilities and the DP.
+- Important correctness details:
+  - Start t from 1.
+  - Never propagate from goal (always skip id == goal).
+  - If start == goal and route is non-empty, the evaluator should still be consistent; however, the program must handle start==goal by outputting an empty string early.
+
+Base route construction and candidate generation:
+- Build trans first.
+- If start == goal: immediately print a newline and exit.
+- For each direction priority order, run BFS. If it returns empty, rerun with "UDLR". If still empty, skip this order (should be rare in valid inputs).
+- For each base shortest path P (only if |P| ≤ 200), generate robust variants (always enforce length ≤ 200). Deduplicate candidates using a hash set. Include at least:
+  - Plain P.
+  - Full repeats: repeat P k times (k ≥ 2) as long as total length ≤ 200.
+  - Repeat P to fill up close to 200 (finite repetition until next would exceed 200).
+  - Duplication per move: map c -> cc if 2|P| ≤ 200.
+  - Triplication per move: map c -> ccc if 3|P| ≤ 200.
+  - Spaced reinforcement:
+    - Duplicate every 2nd instruction while keeping length ≤ 200.
+    - Duplicate every 3rd instruction while keeping length ≤ 200.
+  - Prefix duplication: for several k values (e.g., k in {1,2,3,4,5,6,8,10,12,15, |P|/2, |P|-1} clamped to [1..|P|]), duplicate only the first k steps while keeping length ≤ 200.
+- Sanitize every candidate before evaluation:
+  - Truncate to ≤ 200.
+  - Replace any non-UDLR character with 'U' (should not occur if built correctly).
+  - If start != goal, avoid empty candidates; if all else fails, fallback to a trivial non-empty route within 200 (e.g., repeat a BFS path or a simple pattern like repeating a valid BFS path to fill to ≤200).
+- If for any reason no candidates are produced, fallback to at least the default BFS path ("UDLR" order) and its bounded repetitions within 200.
+
+Initial selection and local search:
+- Evaluate all generated candidates using the DP and pick the best as the initial solution.
+- Time budget for local search ~0.8–1.8 seconds CPU time (leave margin for printing). 1.5–1.6 seconds is a good default.
+- Mutations to explore (always keep alphabet {U, D, L, R} and length ≤ 200). Examples:
+  - Replace a character at a random position with another direction.
+  - Insert a direction at a random position (only if current length < 200).
+  - Delete a character at a random position (if length > 0; keep non-empty if start != goal).
+  - Swap two positions.
+  - Reverse a small segment (e.g., length ≤ 10).
+  - Duplicate a character at a random position (if length < 200).
+- Use simulated annealing:
+  - Accept a mutation if it improves the expected score.
+  - Early on, accept worse solutions with probability exp((newScore - curScore)/Temp) using a cooling schedule from T0 to T1 over elapsed time.
+  - Track and remember the best solution found at any time; output this best, not just the last.
+- Always sanitize and enforce length ≤ 200 after every mutation.
+- Ensure the route is non-empty if start != goal; if a mutation makes it empty, discard or revert it.
+
+Implementation details and performance:
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);.
+- Preallocate arrays for DP (size 400) and reuse them; clear with simple loops.
+- Use steady_clock/high_resolution_clock to seed RNG and measure time. Mix in address bits to avoid poor seeds.
+- Use static or stack arrays for DP: double cur[400], nxt[400]; clear nxt each step; ensure cur[goal] remains 0 by skipping propagation from goal and absorbing after each step.
+- Avoid undefined behavior and heavy recursion.
+- Avoid pushing self-loops in BFS (trans[u][d] == u) to keep the graph compact and correct.
+
+Final safety before printing:
+- Right before printing the final best route:
+  - Re-sanitize: keep only characters in {U,D,L,R}; replace others with 'U' (should not happen).
+  - Truncate to ≤ 200 characters.
+  - If start != goal and the best route somehow becomes empty, fallback to a shortest BFS path (or its repetition) within 200 characters.
+- Print exactly one line with the final route (possibly empty only if start==goal), followed by a single newline. Do not print anything else.
+
+Validation of input lengths and failure handling:
+- If any read fails or if any of the 20 h-lines are not exactly length 19 or any of the 19 v-lines are not exactly length 20, immediately print a single blank line (just “\n”) and exit.
+
+Wrap-only requirement:
+- Output must contain exactly one fenced C++ code block starting with ```cpp and ending with ```. No text, comments, or logs outside that code block.

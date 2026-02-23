@@ -1,0 +1,103 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. Follow these strict rules:
+
+- Your response must ONLY contain the C++ code, wrapped in ```cpp and ```. No extra text or explanations.
+- Respect typical competitive programming limits. For this task, n ≤ 1000, so an O(n^2) simulation is acceptable.
+- The program must read from standard input and write to standard output.
+
+Problem summary (precise restatement):
+
+- Input:
+  - First line: integer n (3 ≤ n ≤ 1000).
+  - Second line: permutation p of [1..n].
+- Operation:
+  - Choose integers x > 0 and y > 0 with x + y < n.
+  - Split array into A | B | C where |A|=x, |C|=y, |B|=n - x - y ≥ 1.
+  - Transform to C | B | A (i.e., swap the outer blocks, keep middle intact).
+- Output:
+  - First line: m, the number of operations (must be ≤ 4n).
+  - Next m lines: the pairs x y for each operation.
+- Goal:
+  - Produce the lexicographically smallest permutation achievable within ≤ 4n operations.
+  - For n = 3, only two states are reachable: original and after (1,1). Choose the lexicographically smaller of the two.
+  - For n ≥ 4, the lexicographically smallest achievable is the fully sorted permutation [1,2,...,n]. Construct it within ≤ 4n operations.
+
+Critical constructive facts (must use exactly and carefully):
+
+1) n = 3 special case:
+   - The only valid operation is (x=1, y=1).
+   - Compare original p with the array after applying (1,1). Output either 0 or 1 operation accordingly.
+
+2) Fundamental 2-operation lemma (block-moving primitive):
+   - For a partition of the current array into consecutive blocks P1 | P2 | P3 | P4 (lengths a, b, c, d; some may be empty), the following two operations move block P2 to the end while keeping P1 at the front and preserving relative order within each block:
+     - op1: x = |P1| = a, y = |P4| = d   → array becomes: P4 | P2 | P3 | P1
+     - op2: x = |P4| + |P2| = d + b, y = |P1| = a   → array becomes: P1 | P3 | P4 | P2
+   - Both ops must be valid at each step (x > 0, y > 0, x + y < n). In particular, op1 requires |P4| > 0 (non-empty suffix C). op2 requires d + b > 0 and a > 0.
+
+3) Sorting to identity for n ≥ 4 (≤ 2n operations if implemented exactly; in any case ≤ 4n is required):
+   - Maintain the current array and a position map pos[val] (1-indexed positions).
+   - First place value 1 at position 1:
+     - If pos(1) == 1: do nothing.
+     - Else (n ≥ 4 always in this stage):
+       - If pos(1) ≥ 3: apply a single operation with x = 1, y = n - pos(1) + 1. This ensures B has length pos(1) - 2 ≥ 1 and moves 1 to the very front.
+       - If pos(1) == 2: apply two operations:
+         a) op: x = 1, y = 2 (valid because n ≥ 4), which moves 1 from position 2 to position 3.
+         b) Recompute pos(1); apply op: x = 1, y = n - pos(1) + 1 to move 1 to the front.
+   - Then for i from 2 to n, place value i at position i while preserving the sorted prefix [1..i-1] at the very front in order:
+     Let current pos = pos[i], and define:
+       a = i - 1
+       b = pos - i           (number of elements strictly between i-1 prefix and i)
+       c = n - pos           (suffix length after i)
+     Because the prefix [1..i-1] is always at positions [1..a] and contains exactly those i-1 values, we always have pos ≥ i (so b ≥ 0).
+     Cases:
+     - If pos == i: continue.
+     - If pos < n (c > 0):
+         Use the 2-operation lemma with:
+           P1 = prefix of length a (the sorted [1..i-1]),
+           P2 = the block from index i to pos-1 (length b, possibly 0),
+           P3 = the single element [i] at pos (length 1),
+           P4 = the suffix after pos (length c, non-empty).
+         Concretely apply:
+           1) op1: x = a, y = c
+           2) op2: x = c + b, y = a
+         This places i at position i and preserves the prefix [1..i-1] at the front.
+     - If pos == n (c == 0):
+         There are two subcases; both preserve the prefix [1..i-1] at the front and place i at position i:
+         - If n - i ≥ 2 (i ≤ n - 2):
+             Apply exactly 2 ops:
+               1) op: x = a, y = 2
+               2) op: x = 1, y = a
+             After these two operations, the array becomes [P1 | i | P2] with P1 (the sorted [1..i-1]) intact at the front.
+         - If n - i == 1 (i == n - 1):
+             Apply exactly 2 ops:
+               1) op: x = a - 1, y = 2   (note: a - 1 ≥ 1 since n ≥ 4 → i ≥ 3)
+               2) op: x = 1, y = a
+             After these two operations, the array becomes [P1 | i | q] (where originally it was [P1 | q | i]), and P1 stays intact at the front.
+
+   - These rules ensure no invalid operations are created: always check x > 0, y > 0, and x + y < n before applying. With the above formulas and given guards, these always hold.
+
+Implementation guidance:
+
+- Maintain the current array and pos[val] (1-indexed).
+- Implement a function apply(x,y):
+  - Assert x > 0, y > 0, x + y < n, and B length n - x - y ≥ 1.
+  - Build the new array as: C (last y elements) + B (middle) + A (first x elements).
+  - Update pos for all moved elements.
+  - Record the operation (x,y).
+- For n = 3: handle the special lexicographic choice using one simulated (1,1).
+- For n ≥ 4: perform the sequence described above.
+- At the end, print the number of operations m (must be ≤ 4n), followed by each x y on their own line.
+
+Important correctness notes (addressing known pitfalls from prior attempts):
+
+- Never apply the 2-operation lemma’s (x = a, y = c) and (x = c + b, y = a) pair when c == 0 (i.e., pos == n), because op1 would be invalid (y must be > 0). Use the dedicated pos == n handling above.
+- Ensure that throughout the i-loop, the prefix [1..i-1] remains exactly in positions [1..i-1]. This invariant guarantees pos ≥ i and avoids invalid x + y ≥ n situations.
+- Always recompute pos after each apply.
+- Keep a strict cap: do not exceed 4n operations. The described strategy stays within ≤ 2n operations.
+
+Output format:
+
+- Print m.
+- Then m lines with "x y".
+- No extra spaces or blank lines.
+
+Wrap only the final C++ program in ```cpp ... ```.

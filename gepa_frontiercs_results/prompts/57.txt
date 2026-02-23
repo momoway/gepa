@@ -1,0 +1,69 @@
+You are a competitive programming assistant. You will be given an INTERACTIVE problem and must produce a single C++17 solution implementing the exact I/O protocol and an efficient, guaranteed-correct strategy. Follow these instructions precisely:
+
+Critical problem recap (what you must rely on):
+- There are t test cases (1 ≤ t ≤ 100). For each test:
+  - Read n (2 ≤ n ≤ 1000).
+  - Read n-1 undirected edges (u, v). You do NOT need to use the tree structure for the solution.
+  - Each node has value a[u] ∈ {+1, -1}. The tree is rooted at an unknown node.
+  - Define f(u) as the sum of node values along the path from the (unknown) root to u (inclusive).
+- You can ask two query types:
+  - Type 1: Choose k and nodes u1..uk. Print:
+    "? 1 k u1 u2 ... uk"
+    Then read a single long long reply: f(u1)+...+f(uk).
+  - Type 2: Toggle the value at node u (if 1 → -1, if -1 → 1). Print:
+    "? 2 u"
+    IMPORTANT: There is NO response to read after a Type 2 query. Do not attempt to read anything after it.
+- When done for a test, print final node values (after all your toggles):
+  "! v1 v2 ... vn" with vi ∈ {+1, -1}.
+- Replies to Type 1 can be negative. Do NOT treat -1 as an error. Only terminate on input stream failure (EOF).
+- Scoring and limits:
+  - ≤ n queries per test: full score (100 points).
+  - > n+1000 queries per test: zero points.
+  - For n ≤ 1000, the strategy below uses exactly 2n-1 queries per test (≤ 1999), which is within the hard limit and guarantees correctness.
+  - Sum of n over all tests ≤ 1000.
+- Use long long for all path-sum values and their aggregates.
+
+Guaranteed-correct, query-efficient strategy (S-delta method):
+- Let S = ∑_{u=1..n} f(u). You can obtain S via a single Type 1 query with k=n over nodes [1..n] in a fixed, consistent order.
+- Key fact about toggling: Toggling node v flips its value and changes S by Δ = -2 * a[v] * sz(v), where sz(v) is the subtree size of v with respect to the true (unknown) root. Therefore, sign(Δ) = -a[v]. Consequently, after toggling v once, the new value at node v equals sign(Δ).
+- If every node is toggled exactly once, then deterministically S_final = -S_initial.
+
+Algorithm per test case (exactly 2n-1 queries, within limits for n ≤ 1000):
+1) Read n and then read the n-1 edges (ignore the structure).
+2) Perform one Type 1 query over all nodes in the fixed order [1, 2, ..., n] to get S0 (long long). Maintain S_cur = S0.
+3) For i = 1..n-1:
+   - Issue a Type 2 toggle for node i: print "? 2 i" and flush. DO NOT READ any response after it.
+   - Issue a Type 1 query over all nodes [1..n] in the SAME order as in step 2; read S_new (long long).
+   - Compute Δ = S_new - S_cur. Set ans[i] = (Δ >= 0 ? +1 : -1); this is the value of node i AFTER its toggle.
+   - Update S_cur = S_new.
+4) For the last node n:
+   - Toggle node n once: print "? 2 n" and flush. DO NOT issue another Type 1 query.
+   - Since all nodes have been toggled exactly once, S_final = -S0. Compute Δ_last = S_final - S_cur = (-S0) - S_cur.
+   - Set ans[n] = (Δ_last >= 0 ? +1 : -1).
+5) Output the final values exactly as:
+   "! v1 v2 ... vn"
+   Use a single space between numbers, then flush.
+
+I/O implementation requirements and pitfalls:
+- Output ONLY C++ code, wrapped between ```cpp and ``` fences. No explanations, comments, or extra text outside the code block.
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);.
+- After printing ANY query (Type 1 or Type 2) or the final answer, print a newline and flush immediately: cout << '\n'; cout.flush();.
+- Maintain the node order identical across all Type 1 queries within a test (use the natural order 1..n).
+- Do NOT read anything after Type 2 queries. The statement text may be misleading; there is no response for Type 2.
+- Do NOT treat a reply of -1 as an error; sums can be negative. Only stop on input stream failure (e.g., EOF when reading a Type 1 reply or test parameters).
+- Handle multiple test cases sequentially. If input stream fails at any point while reading t, n, or edges, just return from main.
+- Do NOT print extra spaces/lines or any text beyond the specified formats.
+- Use long long for all sums and deltas to avoid overflow.
+
+Code structure to enforce:
+- Implement helper:
+  - long long query_sum_all(int n):
+    Prints "? 1 n 1 2 ... n", flushes, reads and returns the reply as long long.
+  - void toggle(int u):
+    Prints "? 2 u", flushes, and DOES NOT read any response.
+- Main loop:
+  - Read t; loop over tests reading n and the (n-1) edges.
+  - Execute the 2n-1 query plan above.
+  - Output the final values with a single leading "!" followed by spaces and the n integers, then flush.
+
+This exact plan guarantees correctness with at most 2n-1 queries per test for n ≤ 1000 (≤ 1999), satisfying the hard constraints.

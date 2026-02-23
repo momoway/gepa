@@ -1,0 +1,103 @@
+You are a competitive programmer. You will be given an INTERACTIVE problem and must implement a correct, efficient C++ solution. Your response must contain ONLY the C++ code wrapped in ```cpp and ``` with no extra commentary. Be careful with interactive I/O, flushing, and constraints. Follow these instructions precisely.
+
+Interactive Problem: “Bakery Survey”
+
+What you get:
+- The first line of input contains two integers n and k (1 ≤ k ≤ n ≤ 1024), both powers of 2.
+- There are n bakeries, indices 1..n (1-based). Bakery i has a cake type a_i (unknown).
+- Your goal is to compute d = number of distinct cake types among a_1..a_n.
+- You interact with a helper that keeps a FIFO memory S of capacity k. S stores CAKE TYPES (values), not indices. Duplicates are allowed in S; membership checks are by value.
+- You may perform:
+  - Query: “? c”
+    - Judge responds with a single character:
+      - ‘Y’ if a_c is already in S before the query
+      - ‘N’ otherwise
+    - Then a_c is appended to the end of S; if |S| > k, the front is removed (FIFO).
+  - Reset: “R”
+    - S becomes empty immediately.
+  - When you know the answer, output “! d” and terminate immediately.
+
+I/O rules and MUSTs:
+- After printing a query or reset, flush immediately (cout.flush()).
+- After each “? c”, immediately read exactly one character response: loop and ignore any whitespace until you get a single ‘Y’ or ‘N’.
+- Do not print anything other than lines of the form “? c”, “R”, and “! d”.
+- Terminate as soon as you print the final answer.
+
+Constraints and scoring:
+- Total operations (queries + resets) must be ≤ 100,000.
+- Score is based on cost = (#resets)*n + (#queries) + 1, but correctness is mandatory. Use few resets.
+
+Semantics reminders and pitfalls:
+- S is a FIFO queue of VALUES (cake types). When you query “? c”, the membership test is evaluated BEFORE appending a_c and any eviction.
+- Because S is by value, to reliably check if a_i == a_j you can: Reset; query i; query j; the second response is ‘Y’ iff equal.
+- If you query the SAME INDEX multiple times without a reset in between, the second and later queries will return ‘Y’ due to its own previous insertion. Therefore, if you need to re-query any index later, ensure there is a RESET before that to avoid self-induced ‘Y’.
+- When you load a batch of “left” values into S and then sweep “right” values, you must cap the number of right queries per load so that all left batch values are still present at the moment of the presence check for each right. With s left items loaded, you can safely process up to tR = k - s + 1 right queries per load: for the (k - s + 1)-th right, all s left are still present during the presence check; eviction (of the oldest left) happens only after that query.
+
+High-level algorithm (correct and low-reset):
+- Let B = n / k (integer since both are powers of 2).
+
+- Fast path when k == n (B == 1):
+  - Reset once; query indices 1..n in order.
+  - The number of ‘N’ responses equals d exactly (no evictions occur during this pass).
+  - Output “! d” and terminate.
+
+- General case (B ≥ 2): Two phases.
+
+Phase A: Within-block deduplication (exact; one reset per block)
+- Partition indices 1..n into B contiguous blocks of size k: block b is indices [b*k+1 .. (b+1)*k] for b = 0..B-1.
+- For each block:
+  - Print “R”.
+  - Query each index in that block in increasing order.
+  - Mark index i alive iff the response is ‘N’. (Within a block, since capacity equals block size and we reset before the block, there is no eviction; ‘Y’ exactly means a duplicate within the block.)
+
+Phase B: Cross-block deduplication via hierarchical merges
+- We iteratively merge groups of neighboring blocks in rounds. For t = 0,1,... while (1<<t) < B:
+  - Group size G = 2^(t+1). Half size H = 2^t.
+  - For each group of blocks [g .. g+G-1] (g steps by G):
+    - Left half blocks: [g .. g+H-1], Right half blocks: [g+H .. g+G-1].
+    - Gather LeftAlive = concatenation (by index order) of all currently alive indices from the left half blocks.
+    - Gather RightAlive = concatenation (by index order) of all currently alive indices from the right half blocks.
+    - If either LeftAlive or RightAlive is empty, skip this group.
+
+    - Choose a left sub-batch size s adaptively to reduce resets:
+      - If k == 1: set s = 1 and tR = 1 (special-case).
+      - Else: 1 ≤ s ≤ min(|LeftAlive|, k-1).
+      - Let L = |LeftAlive| and R = |RightAlive|.
+      - For each candidate s, define tR = k - s + 1.
+      - Estimate group reload count as ceil(L / s) * ceil(R / tR); pick s minimizing this. If multiple tie, prefer the largest s.
+
+    - Process LeftAlive in consecutive sub-batches Lsub of size ≤ s, in order:
+      - Start a fresh reset: print “R”.
+      - Load Lsub by querying its indices in order. Ignore the Y/N responses from these loads (these only reflect duplicates within Lsub; loading is solely to put these values into S).
+      - Now sweep all indices in RightAlive (in increasing index order) with as FEW reloads as possible while guaranteeing correctness:
+        - Let currS = Lsub.size(), and set tR = k - currS + 1 (but at least 1).
+        - Maintain a counter used = 0 for how many right queries we have performed since the last load of Lsub.
+        - For each r in RightAlive:
+          - If r is no longer alive, skip it.
+          - If used == tR:
+            - Print “R”, reload the same Lsub (query them again), set used = 0.
+          - Query r and read its response:
+            - If response is ‘Y’, set alive[r] = false (r matches something currently present in S).
+          - Increment used by 1.
+      - Important safety properties:
+        - Starting each Lsub sweep with a RESET ensures that repeatedly querying the same right indices across different Lsubs never produces a false ‘Y’ due to their own previous insertion.
+        - During a sweep, ‘Y’ on a right may be due to either matching a left value or matching a previously queried right; both are safe because we only mark right items dead in Phase B. We never delete left items in Phase B.
+
+- After all rounds, the surviving alive[] entries are exactly one representative per distinct cake type across all n indices.
+
+Implementation details:
+- Maintain vector<char> alive(n+1), where alive[i] is set to 1 exactly when index i is currently a surviving representative.
+- Helper functions:
+  - do_reset(): print “R”, newline, flush.
+  - do_query(i): print “? i”, newline, flush, then read and return a single char response (‘Y’ or ‘N’). Implement a robust reader that skips all whitespace/newlines and returns only when it reads ‘Y’ or ‘N’.
+- Keep total operations (queries + resets) comfortably under 100,000. With the above adaptive batching and hierarchical merges, this is easily satisfied.
+- After finishing, compute d = count of alive[i] for i = 1..n. Print “! d”, flush, and exit immediately.
+
+Edge cases:
+- k == n: single reset and sweep; d is the number of ‘N’.
+- k == 1: Phase A keeps everything alive (each block has size 1). Phase B uses s = 1 and tR = 1; for each left load you can safely process one right query before reloading. Correctness holds because presence check occurs before eviction.
+- Empty halves in a group: skip.
+- Never print anything except the allowed commands. Always flush after every output line.
+
+Output requirement for this platform:
+- Your response must ONLY contain the C++ code inside a single ```cpp ... ``` block, with no additional text.

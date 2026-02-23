@@ -1,0 +1,93 @@
+You are a competitive programmer. You will be given a 2-constraint bounded knapsack problem in JSON format and must implement a robust, fast C++17 solution that outputs valid JSON only. Follow all requirements below carefully.
+
+Task summary
+- You have a single bag with two capacity constraints:
+  - Mass capacity: 20 kg = 20,000,000 mg
+  - Volume capacity: 25 liters = 25,000,000 µL
+- There are exactly 12 treasure categories (keys), each with:
+  - q: maximum integer count available (1 ≤ q ≤ 10000)
+  - v: value per item (0 < v ≤ 1e9)
+  - m: mass per item in mg (0 < m ≤ 20e6)
+  - l: volume per item in µL (0 < l ≤ 25e6)
+- Goal: Choose nonnegative integer counts for each category to maximize total value without exceeding either capacity.
+- This is a scoring problem with a baseline; exact optimality is not required. However, the output must always be valid and feasible, or it will be judged as Wrong Answer.
+
+Input format
+- The entire input is a single JSON object whose keys are category names (strings of ≤ 100 lowercase ASCII chars), and whose values are arrays of four integers: [q, v, m, l].
+- Example:
+  {
+      "circlet": [19, 113005, 146800, 514247],
+      ...
+  }
+- There are exactly 12 categories, but do not hardcode the number; parse all entries robustly from start to end.
+
+Output format
+- Print a JSON object with the exact same keys as input (same order as they appear in the input), and integer values indicating how many items of each category you pick.
+- Do not print any extra text, debug logs, or explanations. Your response must ONLY contain the C++ code wrapped in ```cpp ... ```.
+- Formatting must be valid JSON:
+  - Opening brace on its own line, then each "key": value pair on its own line, separated by commas, and closing brace on its own line.
+  - No trailing comma after the last key-value pair.
+  - Keys must match input keys exactly (same spelling/case).
+
+Correctness and robustness requirements
+- Always output a feasible solution:
+  - 0 ≤ chosen count ≤ q for each category.
+  - Sum(count[i] * m[i]) ≤ 20,000,000 mg.
+  - Sum(count[i] * l[i]) ≤ 25,000,000 µL.
+- Use 64-bit integers (int64_t / long long) for all sums and products (values, masses, volumes) to prevent overflow: v up to 1e9, q up to 1e4, totals up to ~1e14.
+- If parsing fails for any reason, default to outputting zero for all parsed categories to ensure valid JSON (still feasible though low score).
+
+Parsing requirements
+- Do NOT rely on external libraries. Use standard C++ only.
+- Implement a minimal, robust JSON scanner:
+  - Read the entire input into a string.
+  - Iterate and extract:
+    - The next key: a string between double quotes.
+    - The next array: exactly four integers [q, v, m, l] (allow arbitrary whitespace and commas).
+  - Skip any whitespace and punctuation correctly.
+  - Preserve keys and their original order for output.
+- Do not assume fixed spacing, newlines, or that arrays are on a single line.
+
+Algorithm requirements (fast heuristic with guaranteed feasibility)
+- Time limit is 1 second; memory limit is 1024 MB. Your solution must be fast and memory-safe. Do NOT implement heavy DP across capacities (capacities are too large). Avoid solutions that may explode in state count or use >300 MB.
+- Implement a high-quality, multi-start greedy + local search heuristic:
+  1) Precompute capacities:
+     - W = 20,000,000 (mg), C = 25,000,000 (µL).
+     - Use double for density computations but keep all counts/sums in int64.
+  2) Build a set of candidate scoring functions to balance mass vs volume:
+     - For several weights w ∈ {0.0, 0.2, 0.35, 0.5, 0.65, 0.8, 1.0}, define score_i(w) = v_i / (w * (m_i / W) + (1 - w) * (l_i / C)).
+       - If denominator is 0 (should not happen with valid data), skip that item for that w.
+     - For each w, sort categories by decreasing score_i(w) and greedily take as many items of each category as fit, capped by q and remaining capacities.
+     - Keep the best feasible solution among all w.
+  3) Feasibility repair (safety net):
+     - If any greedy step ever overshoots (shouldn’t if coded correctly), reduce counts by iteratively removing items with lowest marginal score until both capacities are within limits.
+  4) Local improvement:
+     - Hill-climb with simple neighborhoods under capacity:
+       - Try for each pair (i, j): remove 1 item of i (if count_i > 0) and add as many items of j as fit up to q_j - count_j, accepting only if value improves and capacities remain respected.
+       - Also try single-category nudges: add 1 of i if it fits and improves; remove 1 of i if it helps accommodate adding better items.
+       - Iterate over categories a few rounds or until no improvement. Limit iterations to keep runtime small (e.g., cap total attempts or stop if elapsed time is near 800–900 ms).
+  5) Optional bounded refinement (only if kept lightweight):
+     - On at most K categories with very small q or big value density (e.g., select those with q ≤ 25 or items that are “heavy”), try small exact enumeration on their counts within feasible bounds while filling the remainder greedily. Impose hard caps on enumeration size and early-exit if it grows large.
+  6) Final pass:
+     - Ensure counts are integers within [0, q] and both capacity constraints are satisfied. If not, remove items with worst value-per-(m/W + l/C) until feasible, then try cheap additions again.
+
+Performance safeguards
+- Avoid any O(capacity) DP. Do not build 2D DP tables over mass/volume. Do not store layers of states per bundle; this can cause memory/time blowups.
+- Keep all loops small (12 categories). Greedy sorts are O(12 log 12), negligible.
+- For local search, cap total attempts (e.g., a few thousand moves) or check elapsed time if you use a clock. Do not depend on randomness for correctness.
+- Use only standard containers; avoid recursion depth issues.
+
+Output
+- Print the JSON with the exact input keys in the exact same order.
+- Values must be single nonnegative integers.
+- No trailing commas, no extra spaces beyond what’s acceptable JSON, no additional lines or commentary.
+
+Code format requirement
+- Your response must ONLY contain the C++ code, wrapped in ```cpp and ```. No extra text before or after.
+
+Testing notes
+- Ensure your code handles:
+  - Arbitrary whitespace and newlines in input JSON.
+  - Large v, q, m, l close to limits without overflow.
+  - Cases where some items are too heavy or voluminous to take even one (then choose 0 for those).
+  - Deterministic behavior (no randomness required).

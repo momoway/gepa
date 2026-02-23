@@ -1,0 +1,56 @@
+You are a competitive programmer. You will be given a problem statement, implement a solution in C++. The input will be a single odd integer k (1 <= k <= 2^31 - 1). You must output a Push-Pop program (at most 512 instructions) that halts after executing exactly k instructions. The program is an interpreted language with:
+- Instruction type 1: "POP a GOTO x PUSH b GOTO y"
+  Semantics: If the stack’s top equals a, pop it and go to instruction x. Otherwise (including empty stack), push b and go to instruction y.
+- Instruction type 2: "HALT PUSH b GOTO y"
+  Semantics: If the stack is empty, halt after executing this instruction (no push). Otherwise, push b and go to instruction y.
+Constraints: 1 <= a, b <= 1024; 1 <= x, y <= n; 1 <= n <= 512. Start at instruction 1 with an initially empty stack. You must print:
+- First line: n (number of instructions)
+- Next n lines: each instruction as specified above.
+Your response must ONLY contain the C++ code, wrapped in ```cpp and ``` with no additional commentary.
+
+Key domain facts and strategy:
+- Every non-halting instruction changes stack size by ±1. To halt, the last executed instruction must be a HALT executed on an empty stack. Hence total instruction count must be odd; k is guaranteed odd.
+- Construct the program from “blocks” that start and end with an empty stack, so they can be concatenated. Each block contributes a precise number of executed steps.
+- Core gadget (binary carry toggler):
+  For m >= 1, define m instructions T0..T(m-1):
+    Ti: POP (i+1) GOTO T(i+1) PUSH (i+1) GOTO T0   (with Tm meaning exit of block)
+  Starting empty at T0, this requires exactly (2^(m+1) - 2) instructions to reach Tm with an empty stack.
+- Connector gadget (2-step, preserves emptiness and jumps to the next block):
+    J1: POP C GOTO J2 PUSH C GOTO J2
+    J2: POP C GOTO NEXT PUSH C GOTO NEXT
+  With empty stack entering J1, exactly 2 instructions are executed and the stack is empty at NEXT. Use a fixed C (e.g., 1024) distinct from toggler symbols.
+- Last step must be HALT executed with empty stack (e.g., "HALT PUSH 1 GOTO 1").
+
+Achieving exact k:
+- Let t = k + 1. Write t as a sum of powers of two: t = sum over e where bit e of t is set (e >= 1). For each such e, create a block whose weight is 2^e steps:
+  - If e = 1 (m = e - 1 = 0):
+    - Non-final block: just the 2-step connector J1->J2 to the next block’s entry (contributes exactly 2 steps).
+    - Final block: a single HALT instruction (contributes exactly 1 step), yielding total sum minus 1 overall as required.
+  - If e >= 2 (m = e - 1 >= 1):
+    - Non-final block: T0..T(m-1) followed by the 2-step connector to the next block’s entry. Total steps in block = (2^(m+1) - 2) + 2 = 2^e.
+    - Final block: T0..T(m-1) followed by a single HALT. Total steps = (2^(m+1) - 2) + 1 = 2^e - 1.
+- Chaining all selected bits’ blocks in ascending e, with connectors between non-final blocks and ending with a final block using HALT, yields total executed steps:
+  sum(2^e for all blocks except final) + (2^(e_last) - 1) = (k + 1) - 1 = k.
+
+Implementation details:
+- Build blocks in ascending e (from lowest set bit >= 1 to highest).
+- Maintain a “pending connector” target to patch: for each non-final block, its J2 must jump to the entry index of the next block. Store J2’s instruction index and patch x,y after creating the next block.
+- Within a toggler block (m >= 1):
+  - Use symbols a = 1..m for Ti.
+  - For i < m-1: Ti.x = index(T(i+1)), Ti.y = index(T0).
+  - For i = m-1:
+    - Non-final: Ti.x = index(J1) of this block’s connector; Ti.y = index(T0).
+    - Final: Ti.x = index(HALT) (added after Ti’s insertion); Ti.y = index(T0).
+- Connector:
+  - Use a fixed C = 1024 (within 1..1024 and distinct from toggler symbols).
+  - J1: POP C GOTO idx(J2) PUSH C GOTO idx(J2).
+  - J2: POP C GOTO entry_of_next_block PUSH C GOTO entry_of_next_block (set after next block is created).
+- Final block if m = 0: Just output HALT (e.g., “HALT PUSH 1 GOTO 1”).
+- Start of program is the entry of the first block created; ensure it has instruction index 1 by constructing in order.
+- Validate that total instructions n <= 512 (worst-case around 494 for k up to 2^31 - 1). Use 64-bit integers for k and t.
+
+Output strictly:
+- Print n, then n instruction lines exactly in the formats:
+  - POP a GOTO x PUSH b GOTO y
+  - HALT PUSH b GOTO y
+No extra spaces beyond what’s needed, and no extra commentary. Wrap the C++ in ```cpp ... ``` only.

@@ -1,0 +1,106 @@
+You are a competitive programmer. You will be given an AtCoder Heuristic Contest problem (AHC014 - RectJoin) and must implement a solution in C++ that constructs a valid sequence of operations with decent score. Follow all rules precisely and ensure the output is always legal (no overlaps, perimeter constraints satisfied). The execution time is tight; N ≤ 61 and M ≤ ~N^2/12, so aim for an O(N^3) or better approach with efficient constant factors.
+
+Task summary
+- Grid: integer lattice points (x, y) with 0 ≤ x, y ≤ N-1, N odd (31 ≤ N ≤ 61).
+- Initially, M dots are placed on given grid points.
+- You can repeatedly perform operations to add a new dot and draw the perimeter of a rectangle (axis-aligned or rotated 45 degrees).
+- i-th operation picks p1 (no dot there yet) and three existing dots p2, p3, p4 so that:
+  1) Connecting p1 -> p2 -> p3 -> p4 forms a rectangle either axis-aligned or with sides at 45 degrees.
+  2) No other dots (other than p2, p3, p4) exist on the perimeter of this rectangle.
+  3) The rectangle’s perimeter must not share any positive-length segment with any previously drawn rectangle perimeter (touching at points is allowed).
+- After choosing, place a dot at p1 and draw the rectangle’s perimeter.
+- Goal: maximize score (weighted by distance from center), but primary requirement is legality and performance.
+
+Input format (from STDIN)
+- First line: N M
+- Next M lines: x_i y_i (initial dot coordinates), with floor(N/4) ≤ x_i, y_i ≤ floor(3N/4)
+
+Output format (to STDOUT)
+- First line: K (number of operations)
+- Next K lines: x_{i,1} y_{i,1} x_{i,2} y_{i,2} x_{i,3} y_{i,3} x_{i,4} y_{i,4}
+  - The four points must be in order around the perimeter (clockwise or counterclockwise). The first point is p1 (the new dot).
+- Output must be valid; avoid any illegal operation.
+
+Scoring (for reference)
+- Center c = (N-1)/2.
+- Weight w(x,y) = (x - c)^2 + (y - c)^2 + 1, larger farther from center.
+- High-level objective: add new dots far from center with valid rectangles.
+
+Key constraints and checks
+- p1 must be an empty grid point in-bounds.
+- p2, p3, p4 must be existing dots at the time of the operation.
+- Rectangles allowed:
+  - Axis-aligned: sides parallel to axes.
+  - 45-degree: sides of slope ±1 (equivalently rectangles axis-aligned in coordinates u = x + y, v = x - y).
+- Perimeter constraint: On all four sides, no existing dot is allowed except the three chosen corners p2, p3, p4 (p1 is not yet a dot at selection time).
+- No positive-length overlap with previously drawn perimeters: edges can intersect at single points only.
+
+Implementation strategy (robust greedy)
+- Maintain:
+  - has[x][y]: boolean grid of dots.
+  - Row lists rows[y]: xs with has[x][y] = true.
+  - Col lists cols[x]: ys with has[x][y] = true.
+  - Diagonal lists for 45° rectangles:
+    - For u = x+y in [0..2*(N-1)]: list of v values where a dot exists.
+    - For v = x-y in [-(N-1)..(N-1)]: list of u values where a dot exists.
+  - Used unit edges to enforce non-overlap:
+    - usedH[x][y] for horizontal unit edge (x,y)-(x+1,y) with 0 ≤ x ≤ N-2, 0 ≤ y ≤ N-1.
+    - usedV[x][y] for vertical unit edge (x,y)-(x,y+1) with 0 ≤ x ≤ N-1, 0 ≤ y ≤ N-2.
+    - usedD1[x][y] for diag slope +1 unit edge (x,y)-(x+1,y+1) with 0 ≤ x,y ≤ N-2.
+    - usedD2[x][y] for diag slope -1 unit edge (x,y)-(x+1,y-1) with 0 ≤ x ≤ N-2, 1 ≤ y ≤ N-1.
+  - These unit-edge grids ensure no positive-length overlap: before drawing any side, verify all its unit edges are unused; then mark them used when committing.
+
+Heuristic selection
+- Precompute weights w(x,y) and list all grid points sorted by descending weight.
+- Repeat:
+  - Iterate candidate p1 in descending weight; skip if has[p1] already true.
+  - Try to find a valid axis-aligned rectangle:
+    - For y2 in cols[x1], and x2 in rows[y1], if has[x2][y2] true and x2 != x1 and y2 != y1:
+      - Candidate corners: p1 = (x1,y1), p2 = (x1,y2), p3 = (x2,y2), p4 = (x2,y1) in order around rectangle.
+      - Check perimeter constraint: scan lattice points along each of the four sides; any point (other than p2,p3,p4) must not have has=true.
+      - Check non-overlap: scan unit edges along each side; all must be unused.
+      - If valid, commit operation: print later, set has[p1]=true, update rows/cols/diagonals, and mark unit edges used.
+      - Then restart scanning from the highest-weight remaining p1.
+  - If none axis-aligned works, try 45-degree rectangles:
+    - Let u1 = x1 + y1, v1 = x1 - y1.
+    - For u2 in diagUsOnV[v1] (i.e., u with some dot on line v=v1), and v2 in diagVsOnU[u1] (i.e., v with some dot on line u=u1), with u2 != u1 and v2 != v1:
+      - The three existing corners are at (u2,v1), (u1,v2), (u2,v2). Convert each (u,v) to (x,y) by x=(u+v)/2, y=(u-v)/2; since these come from existing lists they are integer.
+      - Candidate corners in order: p1=(u1,v1), p2=(u1,v2), p3=(u2,v2), p4=(u2,v1), converted to (x,y).
+      - Check perimeter constraint by stepping along lines of slope ±1 between consecutive corners; only p2,p3,p4 can have dots.
+      - Check unit-edge non-overlap using usedD1/usedD2 per step.
+      - If valid, commit and restart from top.
+  - Stop when no candidate p1 yields a valid rectangle in a full pass.
+- This greedy “highest-weight-first” approach typically produces many legal operations and nonzero scores, while remaining fast.
+
+Edge scanning details
+- Perimeter-dot check:
+  - For each of the four sides between consecutive corners (inclusive of endpoints), iterate all lattice points at unit steps:
+    - Axis-aligned: step by (±1,0) or (0,±1).
+    - 45°: step by (±1,±1).
+    - If any point on a side has has[x][y] = true and it is not one of the three allowed corners (p2,p3,p4), reject the rectangle.
+- Edge-overlap check:
+  - For each unit step along the side:
+    - If horizontal: usedH[min(x,x+dx)][y] must be false.
+    - If vertical: usedV[x][min(y,y+dy)] must be false.
+    - If diag +1: usedD1[min(x,x+dx)][min(y,y+dy)] must be false.
+    - If diag -1: define base at min by x; if stepping from (x,y) to (x+1,y-1), index usedD2[x][y] with y being the higher of the two y’s minus 0 (e.g., use the lower x, higher y convention).
+  - Only if all unit edges are free, accept; then mark them used when committing.
+
+Data structures and performance
+- Use static-size arrays [N][N] for has and the used-edge grids.
+- Maintain row/col/diag lists as vectors; when adding p1, push it into the corresponding lists.
+- Use the has[][] grid for O(1) membership checks; do not require sets for rows/cols/diagonals beyond vectors and has[][].
+- N is small (≤ 61), M ≤ ~310; iterating candidates as above is feasible within time limits.
+
+Correctness notes
+- Ensure rectangles have positive side lengths (x2 != x1 and y2 != y1 for axis-aligned; u2 != u1 and v2 != v1 for 45°).
+- Ensure all coordinates are within [0, N-1].
+- The order of corners in output should trace the rectangle perimeter; always output p1 first.
+- Do not overlap already used unit edges (this strictly enforces “no positive-length overlap”).
+- Do not print any extra text.
+
+Coding requirements
+- Implement the above greedy algorithm in C++17 or later.
+- Read from standard input; write to standard output.
+- Wrap the entire program source inside ```cpp ... ``` fences.
+- The response must ONLY contain the C++ code with no additional explanation or text. No logging or debug prints.

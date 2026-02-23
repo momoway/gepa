@@ -1,0 +1,112 @@
+You are a competitive programmer. You will be given a Job Shop Scheduling Problem (JSSP) instance in plain text and must output a schedule in the specific format required by the judge. Implement a robust, efficient C++17 program that constructs high-quality schedules using proven heuristics and local improvement. Follow all requirements below exactly.
+
+Task summary
+- Input describes J jobs and M machines (0-based indices).
+- Each job has exactly M operations; it must visit every machine exactly once, in a job-specific order.
+- Each operation has a fixed (positive) processing time; processing is non-preemptive; a machine can process at most one operation at a time.
+- Output is NOT start/finish times. You must output M lines, where line m is a permutation of {0..J-1}, specifying the processing order of jobs on machine m.
+- The judge computes the earliest-feasible schedule implied by your machine orders and job precedence constraints and measures the makespan (completion time of the last operation). The problem is NP-hard and uses an open scoring scheme rewarding smaller makespans.
+
+Input format (0-based indices)
+- Line 1: J M (integers; J ≥ 1, M ≥ 1)
+- Lines 2..(J+1): for each job j = 0..J-1, a line with 2*M integers:
+  m_0 p_0  m_1 p_1  ...  m_{M-1} p_{M-1}
+  where m_k ∈ {0..M-1} is the machine of the k-th operation of job j, and p_k > 0 is its processing time.
+- Each machine m must appear exactly once in job j’s line (every job visits every machine exactly once; the order of the pairs defines the precedence inside the job).
+
+Output format (strict)
+- Print exactly M lines.
+- Line m (for m = 0..M-1) must contain exactly J distinct integers: a permutation of {0..J-1}. Each is the job index, ordered from first to last on machine m.
+- Do not print anything else (no headers, comments, times, makespan, etc.). 0-based indices only.
+
+Validity rules (enforced by the judge)
+- Each line must be a valid permutation of jobs (no duplicates/missing/out-of-range).
+- The oriented disjunctive graph built from job precedence arcs and your machine-order arcs must be acyclic; otherwise, the output is rejected as infeasible.
+
+Scoring (lower is better; for reference)
+- The judge has (B, T) with T = 0 and B > 0. Your makespan P yields score = clamp(1 - P/B, 0, 1). Your final score is the average across tests.
+
+Constraints and implementation notes
+- Official tests go up to roughly (J, M) ≈ (50, 25), i.e., up to ~1,250 operations total. Processing times can be very large (use 64-bit).
+- You must run within typical contest limits (aim for ~1 second and modest memory; N up to ~1,250 is small enough for O(N + E) per evaluation).
+- Use 64-bit signed integers (long long) for all time computations; sums can exceed 32-bit.
+- Ensure determinism unless randomness is explicitly used with a fixed seed; if using randomization, gate it with a time budget and keep final output feasible.
+- Always produce a feasible permutation per machine; never print a schedule that your own feasibility check detects as cyclic.
+- If anything goes wrong (e.g., time budget exceeded before a feasible solution is found), fall back to a trivial feasible solution (e.g., build via a serial schedule generation scheme or per-machine identity orders consistent with a feasible SGS build) so output is always accepted.
+
+What you must implement
+1) Parsing and preprocessing
+- Read J and M; read each job’s route and processing times.
+- Build:
+  - jobs[j][k] = {mach, p} for k = 0..M-1.
+  - posInJobForMachine[j][m] = position k of machine m in job j’s route (0..M-1). Each machine appears exactly once per job.
+  - op indexing: id = j*M + k; keep arrays opMachine[id], opP[id].
+
+2) Schedule evaluator (feasibility + makespan)
+- Given M permutations (one per machine), construct the directed acyclic graph:
+  - Job edges: for each job j and k=1..M-1, add edge (op j,k-1) -> (op j,k) with weight = processing time of the source op.
+  - Machine edges: for each machine m and its order [j0, j1, ..., j_{J-1}], add edge from each predecessor op to successor op on that machine. If job j appears at position t>0 after job i, add edge (op of job i on machine m) -> (op of job j on machine m), weighted by the processing time of the source op.
+- Compute earliest start (longest path) using topological order (Kahn’s algorithm on the constructed graph). Track:
+  - indegree for topo.
+  - dist[id] = earliest start time of operation id (longest path distance to its start).
+  - If processed != N operations, the orientation induces a cycle -> infeasible.
+- Makespan = max over all ops of dist[id] + opP[id].
+- Use O(N + E), with E ≈ job edges + machine edges = O(JM).
+
+3) Initial solution via Serial Schedule Generation Scheme (SGS)
+- Build feasible machine orders by a serial schedule generation policy:
+  - Maintain for each job j: next operation index idx[j] (initially 0) and ready time rj[j] (initially 0).
+  - Maintain for each machine m: availability Am[m] (initially 0).
+  - At each step, among all jobs with idx[j] < M, consider its next operation (machine m, proc p), with earliest start est = max(rj[j], Am[m]) and finish eft = est + p.
+  - Select a job to schedule next using priority rules; append its job index to orders[m]; update rj[j] = eft; Am[m] = eft; idx[j]++.
+- Use multiple priority rules to generate diverse high-quality starts; for example:
+  - EST_LWR: ascending est, then descending remaining work (sum of remaining processing times), then shorter p.
+  - EFT_LWR: ascending eft, then descending remaining work, then shorter p.
+  - LWR_EST: descending remaining work, then ascending est, then shorter p.
+  - SPT_EST: ascending p, then ascending est, then descending remaining work.
+  - Optionally include LPT (descending p), LRPT (descending remaining work), bottleneck-aware (machines with larger loads/queues).
+- Tie-breaking: deterministic by job index or randomized (e.g., reservoir sampling). If using randomness, bound total tries by a time budget.
+
+4) Local improvement (critical-block adjacent swaps)
+- After picking the best initial candidate by makespan, run iterative improvement within a time budget:
+  - Re-evaluate to get dist and a predecessor array; find an operation with maximum finish time (end of a critical path).
+  - Reconstruct one critical path backward using predecessors.
+  - Identify machine edges along that path; for each critical machine arc u -> v that is adjacent on its machine, try swapping their order on that machine (i.e., swap adjacent jobs in that machine’s permutation).
+  - Accept improving swaps (strictly lower makespan), update the current best; iterate until no improving swap is found or time is up.
+- Optionally expand search:
+  - Try all adjacent swaps on all machines (first-improvement or best-improvement).
+  - Multi-start with small random perturbations to machine orders followed by local search.
+  - Keep global best solution across starts.
+
+5) Robustness and performance
+- Guard all loops by a time budget (e.g., ~500ms–1s total). Use steady_clock/high_resolution_clock to stop searching in time.
+- Use long long for all times. Avoid recursion. Avoid dynamic allocations in tight loops where possible.
+- Always ensure each machine’s order has exactly J distinct job indices 0..J-1. If a construction results in missing jobs for a machine (shouldn’t with SGS), correct by inserting missing jobs.
+- Before printing, ensure your best solution is feasible via the evaluator. If not, fall back to a known-feasible SGS solution (e.g., the best among initial builds).
+
+6) Output
+- Print exactly M lines, each containing J integers separated by a single space. No trailing spaces required; ensure a newline per line.
+- Do not print any other text (no debug, no makespan).
+
+General tips specific to this problem family
+- N can be ~1,250; O(N + E) evaluation with Kahn’s algorithm is fast enough to call many times (hundreds to thousands) within 1s.
+- Use precomputed posInJobForMachine[j][m] to map (job, machine) to operation position quickly when building machine edges and when swapping.
+- Consider seeding RNG deterministically for reproducibility; if seeding by time, ensure you still return a feasible solution even with minimal search time.
+- For M=2, Johnson’s rule gives an optimal order on machines; you may implement a special case to improve results quickly.
+- Infeasible orders can exist; always use the evaluator to verify feasibility before accepting a candidate.
+
+Output policy (very important)
+- Your response must ONLY contain the C++ code, wrapped in:
+  ```cpp
+  // code
+  ```
+  No additional explanations or text outside the code block.
+
+Implementation target
+- C++17, standard library only. Optimize with -O2 or similar assumptions. Keep code self-contained.
+
+By following the above, your solver will:
+- Construct multiple diverse initial permutations via SGS with strong priority rules.
+- Evaluate feasibility and makespan via DAG longest path (Kahn).
+- Improve using critical-block adjacent swaps and simple hill-climbing within a time budget.
+- Always print a valid M-line permutation-only schedule with no extra text.

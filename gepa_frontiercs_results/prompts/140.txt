@@ -1,0 +1,116 @@
+You are a competitive programmer. You will be given a problem statement and must implement an efficient interactive solution in C++. Your output must be exactly one code block wrapped in ```cpp and ``` with no extra commentary.
+
+Task: Implement an interactive solver for “Mineral Deposits (interactive)” that recovers as many deposit coordinates as possible, robustly and deterministically.
+
+Interactive protocol (must strictly follow):
+- There are k deposits at integer coordinates (x_i, y_i), each within −b ≤ x_i, y_i ≤ b.
+- Start by reading three integers: b, k, w.
+- You may make at most w waves (queries). The total number of probes across all waves must not exceed 2·10^4.
+- A wave is printed as:
+  ? d s1 t1 s2 t2 ... sd td
+  where 1 ≤ d ≤ 2000 and −1e8 ≤ s_j, t_j ≤ 1e8.
+- Judge replies with k·d integers in non-decreasing order: the multiset union over all i ∈ {1..k} and j ∈ {1..d} of |x_i − s_j| + |y_i − t_j|. Distances are indistinguishable across probes in the same wave.
+- To finish, print:
+  ! x1 y1 x2 y2 ... xk yk
+  in any order, exactly once as your last output line.
+- Always flush after printing a query or the final answer. Read exactly k·d integers in response to each wave.
+- Never print any extra text. Do not print logs. Each query/answer must be on its own line.
+
+Critical geometry to extract sums/differences (guaranteed since deposits lie in [−b, b]^2):
+- Probing corners linearizes S = x + y and D = x − y:
+  - P1 = (b, b): distance d = |x − b| + |y − b| = (b − x) + (b − y) = 2b − (x + y). So S = x + y = 2b − d.
+  - P2 = (b, −b): distance d = |x − b| + |y + b| = (b − x) + (y + b) = 2b − (x − y). So D = x − y = 2b − d.
+  - From S and D: x = (S + D)/2, y = (S − D)/2. Parity: S and D must have the same parity. Bounds: x,y ∈ [−b, b].
+
+Multiset difference to isolate new probes within a wave:
+- A wave returns one sorted multiset across all its d probes. You can isolate the contributions of new probes by including a known baseline set B of probes and multiset-subtracting the baseline’s response:
+  - Wave1: query only (b, b) ⇒ get Rbb (k numbers).
+  - Wave2: reuse (b, b) and add (b, −b) (and optionally extra anchors; see below) ⇒ get R2 (k·d numbers); the multiset difference R2 − Rbb (by counts) yields exactly the multiset union of distances from the non-baseline probes in that wave.
+- Implement multiset difference as a frequency subtraction on values (unordered_map<long long,int>), not by indices. Always read exactly k·d integers in response.
+
+High-accuracy strategy (deterministic, robust for k ≤ 20):
+1) Corner waves to get S and D:
+   - Wave 1: send a single probe at (b, b). Read Rbb (k distances). Define S_i = 2b − Rbb[i]. Let S be the multiset {x_i + y_i}.
+   - Wave 2: reuse (b, b) and add (b, −b). If possible (see batching below), also add a set of “far” anchors whose distance ranges are disjoint from both corners and from each other.
+     Read R2 and compute V = R2 − Rbb (multiset counts).
+     - If only (b, −b) was added, then V are exactly the k distances from (b, −b). Define D_j = 2b − V[j]; set D = {x_i − y_i}.
+     - If extra anchors were also added, V is the sorted union of d’ blocks (one per new probe). Split V into blocks by scanning and starting a new block whenever the gap between consecutive values exceeds 4b. The first block (values in [0, 4b]) is for (b, −b); later blocks each correspond to an added anchor in the same order they were queried. For the (b, −b) block, compute D as above.
+
+2) Anchor selection and batching (to minimize waves while keeping blocks separable):
+   - Distances to an anchor A = (sx, sy) from the box [−b, b]^2 lie within the interval I(A) = [SA − 2b, SA + 2b], where SA = |sx| + |sy|.
+   - Two anchors A, B produce disjoint distance blocks if |SA − SB| > 4b. Blocks are also disjoint from corner ranges [0, 4b] if SA > 6b.
+   - Batching plan:
+     - Baseline for splitting is always (b, b). Never include (b, b) in “baseline to subtract” unless you also queried it in the wave.
+     - Wave 2: must include (b, b) and (b, −b). Additionally, if SA_limit := 2e8 allows SA > 6b, include as many far anchors as possible whose SAs are strictly increasing and spaced by at least (4b + 1). Construct each anchor with a target SA by choosing coordinates within [−1e8, 1e8] that realize that SA (e.g., (min(1e8, SA), SA − min(1e8, SA)) with non-negative entries), avoiding (b, b) and (b, −b).
+     - Later waves (if needed): reuse the same baseline (b, b) and add a batch of new anchors with disjoint SAs, again spaced by > 4b, and all with SA ranges disjoint from [0, 4b]. Compute response R, subtract Rbb to get blocks, then split by gaps > 4b to recover each anchor’s k distances in order.
+     - If b is large so that SA > 6b is impossible (6b ≥ 2e8), skip batching and use single-probe waves for anchors (still reusing (b, b) as the baseline where appropriate). In such waves, do NOT include (b, b) unless you are using it as the baseline for subtraction; otherwise, read the k distances directly.
+
+3) Candidate generation from S and D:
+   - Build a bipartite graph between the k elements of S (left nodes indexed by multiplicity) and the k elements of D (right nodes indexed by multiplicity).
+   - For each pair (S_i, D_j) with same parity, compute candidate:
+       x = (S_i + D_j)/2, y = (S_i − D_j)/2.
+     Keep the edge only if (x, y) ∈ [−b, b] × [−b, b].
+   - If any S-node has zero edges, something is inconsistent; continue querying anchors if possible or later fall back to any feasible partial matching.
+   - Note: Never finalize using only S and D without anchors unless w == 2 and you cannot extract any anchors in Wave 2; otherwise, you risk returning a wrong matching.
+
+4) Disambiguation using anchors and uniqueness enforcement:
+   - Maintain a list of anchors and, for each, a multiset (unordered_map<long long,int>) of its k distances obtained either directly (single-probe wave) or via block splitting (batched wave).
+   - Do not accept a solution using zero anchors unless constrained to w == 2 and batching failed to add any anchors. In general:
+     - Require at least A_min anchors (e.g., A_min = 3 if k ≤ 10, A_min = 4 or 5 for k up to 20), or keep adding anchors until the solution is unique (see below), subject to wave/probe budgets.
+   - Backtracking solver:
+     - Order S-nodes by increasing candidate-degree to prune early.
+     - DFS with state: which D_j are used, partial assignment, and remaining counts per-anchor (mutable).
+     - For each candidate (x, y) on the chosen S_i whose D_j is unused:
+       - For every anchor a, compute d_a = |x − sx_a| + |y − sy_a| and check cnt_a[d_a] > 0. If any check fails, skip this candidate.
+       - If all pass, decrement cnt_a[d_a] for all anchors, mark D_j used, recurse; on backtrack, restore counts.
+     - Additionally verify that corner distances match expected multisets (this is guaranteed by S/D construction, but implement a check after finding a full assignment for safety).
+   - Uniqueness check:
+     - Modify the DFS to count the number of full solutions up to 2 (stop when you find a second distinct full assignment). If exactly one solution exists, accept it. If 0 or >1 solutions, add more anchors (batched if possible), update anchor multisets, and retry until unique or you run out of waves/probe budget.
+     - If you cannot achieve uniqueness due to w or probe limits, but have at least one solution, output any found solution.
+
+5) Wave-efficient batching details and safety checks:
+   - When subtracting a baseline response Rbb from a wave’s response R:
+     - Compute multiset difference via frequency maps: for each value in Rbb, decrement its count in a hash map; then scan R and collect values whose counts are zero or exhausted. Finally, sort the collected list to be safe and reproducible.
+   - Splitting into blocks:
+     - Given the sorted list Vminus = R − Rbb, split it into consecutive blocks where a new block starts when the current value − previous value > 4b. Ensure the number of blocks equals the number of non-baseline probes in the wave. If not, discard batched interpretation for that wave and fall back to single-anchor waves for reliability.
+   - Respect all limits:
+     - Track waves_used ≤ w, total_probes_used ≤ 20000, and 1 ≤ d ≤ 2000 per wave. Never exceed these.
+
+6) If w is very small (e.g., w == 2):
+   - You can only get S and D, plus possibly a few batched far anchors in Wave 2 if SA > 6b is feasible. Use them to reduce ambiguity if possible.
+   - Otherwise, output any perfect matching between S and D that respects parity and bounds (consistent with the two corner waves but not necessarily the true configuration).
+
+Implementation requirements and pitfalls:
+- Use 64-bit integers (long long) for coordinates and distances. Distances can reach ~4·10^8, sums up to ~2·10^9.
+- Implement multiset difference using unordered_map<long long,int> on values, not indices. After difference, sort the resulting list if you need to split it into blocks.
+- Always read exactly k·d integers in response to each wave; if reading fails (EOF), exit cleanly.
+- Always flush stdout after printing any query or the final answer.
+- Maintain and enforce budgets:
+  - waves_used ≤ w,
+  - total_probes_used ≤ 2·10^4,
+  - 1 ≤ d per wave ≤ 2000.
+- Backtracking/DFS:
+  - Order S-nodes by increasing candidate-degree to prune early.
+  - Maintain per-anchor counts precisely; decrement/increment on forward/backtrack.
+  - Precompute distances from candidates to anchors on the fly or cache them to reduce recomputation.
+  - Implement uniqueness detection by counting solutions up to two.
+- Verification:
+  - After constructing a full assignment, verify that:
+    - The multiset {2b − (|x − b| + |y − b|)} equals S (or equivalently, the distances to (b, b) match Rbb), and
+    - The multiset {2b − (|x − b| + |y + b|)} equals D (or equivalently, distances to (b, −b) match what you extracted).
+    - The multiset of distances to each collected anchor equals its recorded multiset.
+  - If any check fails (e.g., due to incorrect block splitting), discard the affected anchors, add new anchors via safe single-probe waves, and retry.
+
+Output:
+- Print exactly one line:
+    ! x1 y1 x2 y2 ... xk yk
+  containing k coordinates in any order, then flush and terminate. Even if uniqueness was not achieved, print some feasible assignment consistent with the data you have (or fall back to any S–D perfect matching if no anchors or solver failed and you ran out of waves).
+
+Notes from observed pitfalls and required corrections:
+- Do NOT stop after finding a matching with zero anchors; that typically yields a wrong answer. Always gather and use anchors (unless w == 2 and batching was impossible).
+- Prefer batched anchors with disjoint distance ranges via the (b, b) baseline when b is small enough; for large b where SA > 6b is impossible, use single-probe anchor waves.
+- Deterministically choose anchors to space SA values by > 4b and to avoid (b, b) and (b, −b). Keep within [−1e8, 1e8].
+- The judge returns sorted responses; however, implement multiset operations by counts. When splitting batched responses, sort the post-subtraction list and split by gaps > 4b.
+- Never print extra text or logs. Every query and the final answer must be on its own line, and you must flush after each.
+
+Your final C++ program must adhere strictly to the above and emphasize correctness, robust multiset management, uniqueness enforcement (or minimal anchor count), and wave/probe accounting. Avoid randomness; use deterministic anchor construction and ordering to ensure reproducibility.

@@ -1,0 +1,111 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. Your response must contain ONLY the C++ code wrapped in ```cpp ... ``` with no extra text.
+
+When the task is the interactive problem “Probing the Disk”, follow these exact rules and the robust algorithm below.
+
+Problem and interaction summary
+- Square domain: [0, 100000] × [0, 100000] (denote as LIM = 100000).
+- Hidden disk: a circle fully contained in this square with:
+  - Integer center (cx, cy).
+  - Integer radius r ≥ 100.
+  - r ≤ distances from center to each boundary.
+- Up to 1024 probes allowed.
+- Query format:
+  - Print: query x1 y1 x2 y2
+  - 0 ≤ x1, y1, x2, y2 ≤ LIM; integers; and (x1, y1) ≠ (x2, y2).
+  - Flush immediately after each query.
+  - Read from stdin a real number (fixed decimal with 7 digits after decimal point, abs error ≤ 1e-6) = length of intersection of the queried segment with the disk.
+- Answer format:
+  - When certain, print: answer x y r
+  - x, y, r must be integers.
+  - Flush and terminate immediately. Do not print anything else (no extra spaces/lines/debug).
+
+Key geometric facts to use (and pitfalls to avoid)
+- For a vertical line x = X intersecting the circle:
+  - Chord length L(X) = 2*sqrt(r^2 − (X − cx)^2).
+  - Define f(X) = (L(X)^2)/4 = r^2 − (X − cx)^2 = −X^2 + 2*cx*X + const.
+  - Then S(X) = f(X) + X^2 is linear in X with slope 2*cx.
+- From any vertical chord at X: r^2 = (L(X)^2)/4 + (X − cx)^2.
+- Robustly finding cy:
+  - Along a fixed vertical x = X0, the disk intersection is [y1, y2] with total length L0 = y2 − y1.
+  - For the prefix segment [0, Y] on that vertical, the returned length F(Y) = |[0, Y] ∩ [y1, y2]| is:
+    - 0 for Y ≤ y1,
+    - Y − y1 for y1 < Y < y2,
+    - L0 for Y ≥ y2.
+  - Do NOT estimate cy via “find y1 then use y1 + L0/2”; this can cause ±1 rounding errors with noisy answers.
+  - Instead, find cy directly as the unique Y such that F(Y) = L0/2 (midpoint method). Because slope dF/dY = 1 in the middle region, F(Y) ≈ L0/2 implies Y ≈ cy with sub-micro precision even with 1e-6 answer noise. Use an inequality with a small tolerance and an affine correction (see Step 4 below).
+- Do NOT attempt to recover cy from diagonal lines like x + y = const (this approach is unreliable).
+- Use long double for all floating calculations; round final integers with llround/llroundl; clamp final x, y, r to [0, LIM] for safety.
+
+Robust algorithm (≤ 1024 queries in the worst case)
+Constants:
+- LIM = 100000
+- STEP = 200
+- NEAR_OFFS = {+50, −50, +100, −100}   // restricted to keep query budget tight but still guaranteed
+- EPS_HIT = 5e-7                        // treat returned length > EPS_HIT as a definite hit
+- EPS_CMP = 1e-6                        // comparison slack when targeting L0/2
+- BS_ITERS = 18                         // binary search steps on [0, 1e5]
+
+1) Find one vertical chord robustly (defeats the STEP-grid degeneracy when r=100 and cx≡100 (mod 200)):
+   - First pass: sweep x from 0 to LIM inclusive with step STEP:
+       query(x, 0, x, LIM) → L0
+       If L0 > EPS_HIT, set x0 = x, store L0, break.
+   - If no hit after the first pass, do a second pass offset by STEP/2:
+       sweep x from STEP/2 to LIM−STEP/2 with step STEP:
+           query(x, 0, x, LIM) → L0
+           If L0 > EPS_HIT, set x0 = x, store L0, break.
+     (With these two interleaved passes, a hit is guaranteed; total ≤ 1001 vertical queries.)
+   - Keep this L0 (the full length on that vertical) for later use (do not remeasure to keep within budget).
+
+2) Get a second nearby vertical chord to compute cx:
+   - Try offsets in order: +50, −50, +100, −100 (only these four; they are sufficient because 2r ≥ 200 and x0 is strictly inside).
+   - For the first candidate x1 within [0, LIM] with L1 = query(x1, 0, x1, LIM) > EPS_HIT, accept it.
+   - Compute:
+       S0 = (L0^2)/4 + x0^2
+       S1 = (L1^2)/4 + x1^2
+       b = (S1 − S0) / (x1 − x0)   // b ≈ 2*cx
+       cx = round(b / 2)
+
+3) Compute r robustly from the vertical chords (no horizontal needed):
+   - r2_v0 = (L0^2)/4 + (x0 − cx)^2
+   - r2_v1 = (L1^2)/4 + (x1 − cx)^2
+   - r2_avg = average(r2_v0, r2_v1), clamp tiny negatives to 0 if any.
+   - r = round(sqrt(r2_avg))
+
+4) Find cy via a single binary search along the already-hit vertical x = x0 using the half-length midpoint method:
+   - We already have L0 (the full length on x0) and know that L0 ≥ 200.
+   - Let T = L0 / 2 (target prefix length).
+   - Binary search integer Y in [0, LIM] for the smallest Y such that F(Y) ≥ T within tolerance, i.e.,
+       While lo < hi:
+           mid = (lo + hi) / 2
+           Fmid = query(x0, 0, x0, mid)
+           If Fmid + EPS_CMP >= T:    // treat as reaching/above half
+               hi = mid
+               save Y_hit = mid and F_hit = Fmid   // keep the last “hit” value to avoid an extra query later
+           Else:
+               lo = mid + 1
+       At the end Y_hit is the stored hit position (equals lo==hi) and F_hit is F(Y_hit).
+   - Affine correction to get sub-integer center robustly:
+       In the linear region, F(Y) = Y − y1, so around the midpoint:
+           cy ≈ Y_hit − (F_hit − T)
+     Set cy = round(cy_est) where cy_est = Y_hit − (F_hit − T).
+
+5) Output the answer:
+   - Print exactly: answer cx cy r
+   - Flush and exit immediately. Do not print anything else (no extra spaces, prompts, or debug).
+
+Implementation details and safeguards
+- Use ios::sync_with_stdio(false); cin.tie(nullptr);
+- Always flush after every query and after the final answer.
+- All computations in long double; use llroundl to round to integers; clamp cx, cy, r to [0, LIM].
+- Guard against rare tiny negatives from numerical noise when squaring/subtracting by max(val, 0).
+- Query budget upper bound:
+  - Vertical sweep worst case (two interleaved passes): ≤ 1001
+  - Nearby offsets to get second vertical: ≤ 4
+  - One binary search for cy midpoint (saving last hit to avoid extra query): BS_ITERS = 18
+  - Total ≤ 1001 + 4 + 18 = 1023 ≤ 1024.
+
+Strict I/O rules
+- Never print anything other than the specified “query …” and a single final “answer …” line.
+- Each query line must be followed by a newline and a flush.
+- Read the judge’s reply into a long double. If cin fails (EOF), exit immediately.
+- Your final output must be only the C++ code in a single code block.

@@ -1,0 +1,58 @@
+You are a competitive programmer. You will be given a problem statement from an AtCoder Heuristic Contest (AHC003-like: “Grid Shortest Path Estimation”) and must implement a solution in C++. Follow these requirements exactly:
+
+- Your response must ONLY contain the C++ code wrapped in ```cpp and ``` fences. No extra text or explanation.
+- Print the path string for each query and FLUSH stdout immediately after every path (use `cout << path << '\n' << flush;`). Failing to flush may cause TLE/WA.
+- The path string characters must be exactly: 
+  - 'U' = move from (i, j) to (i-1, j), 
+  - 'D' = move from (i, j) to (i+1, j), 
+  - 'L' = move from (i, j) to (i, j-1), 
+  - 'R' = move from (i, j) to (i, j+1).
+- The grid is 30x30, vertices are 0-indexed: (0,0) top-left; (i,j) is row i, column j. You must ensure:
+  - The path is a valid sequence of moves starting at s=(si,sj) and ending at t=(ti,tj).
+  - The path stays within [0,29] for both coordinates.
+  - The path is SIMPLE: do not visit the same vertex more than once (illegal paths are judged WA).
+- There are 1000 queries. For the k-th query:
+  - Read four integers: si sj ti tj.
+  - Output a path string Pk and flush.
+  - Then read one integer feedback yk = round(bk * ek), where bk is the true path length you output and ek is uniform in [0.9, 1.1].
+  - Use this feedback to improve your estimates of edge lengths for subsequent queries.
+
+Important: The judging environment you run in may be either “interactive” (only s,t are provided and the judge returns y after each output) or “offline/local” (a full input file including true edge weights and pre-generated queries with aux info). Your program must auto-detect and support both:
+
+- Interactive mode (AtCoder online judge):
+  - For each of 1000 iterations: read si sj ti tj; output path; flush; read integer y (the noisy path length); then proceed to next query.
+
+- Offline/local mode (pre-generated inputs):
+  - Input format:
+    - First: 30 rows of 29 integers: horizontal edge lengths h[i][j] (edge between (i,j) and (i,j+1)).
+    - Next: 29 rows of 30 integers: vertical edge lengths v[i][j] (edge between (i,j) and (i+1,j)).
+    - Then 1000 lines: si sj ti tj a_k e_k, where a_k is the true shortest-path length and e_k is the noise multiplier used by the official judge (float/double).
+  - In this mode, after printing each path you SHOULD NOT wait to read a judge feedback integer from stdin (there is none). Instead, compute your own feedback y locally:
+    - Using the provided true h and v, compute your path’s true length bk by summing the edges along your printed path.
+    - Compute y = round(bk * e_k) from the line’s e_k, and use that y to update your estimates.
+  - Do not use the true h/v to choose paths; use only your learned/estimated weights to simulate the interactive setting fairly. Use the true h/v only to compute y in offline mode.
+
+Algorithmic approach and constraints:
+- The graph is an undirected grid with:
+  - Horizontal edges: h[i][j] for 0 ≤ i ≤ 29 and 0 ≤ j ≤ 28.
+  - Vertical edges: v[i][j] for 0 ≤ i ≤ 28 and 0 ≤ j ≤ 29.
+- Maintain estimated weights for all edges (initialize to a reasonable constant, e.g., 5000).
+- For each query:
+  - Run Dijkstra’s algorithm on the 30x30 grid using current estimates to compute a shortest path from s to t. This guarantees a simple path with no repeated vertices.
+  - As a robust fallback (if anything fails), generate a simple Manhattan/monotone path (first move vertically toward t, then horizontally, or vice versa), still respecting bounds and simplicity.
+- After outputting the path and obtaining y (either from the judge in interactive mode or computed locally in offline mode), update edge estimates along the used path. Suggested update:
+  - Let pred = sum of current estimated weights along the path and L = path length in edges.
+  - Residual r = y - pred.
+  - For every edge e in the path, update w_e += (alpha / sqrt(1 + count_e)) * (r / L), with clipping to [500, 15000].
+  - alpha can be around 0.3–0.5; maintain per-edge visit counts for a decaying learning rate.
+  - On the very first query, optionally re-initialize all estimates to y / L (clipped) to calibrate scale.
+
+Performance and implementation details:
+- N = 900 nodes, E = 1740 edges (30*29*2). Running Dijkstra (O(E log V)) 1000 times is fine within typical limits.
+- Use adjacency implicit from grid to avoid building large structures repeatedly.
+- Carefully map moves to edges for both prediction (using estimated weights) and true cost computation (offline only).
+- Do not print any debugging output. Only the path string per query.
+- Always flush stdout after each path string.
+
+Deliverable:
+- Provide a single C++17-compatible program implementing the above, printing only the path strings (one per line), learning from feedback, and handling both interactive and offline input formats via auto-detection.

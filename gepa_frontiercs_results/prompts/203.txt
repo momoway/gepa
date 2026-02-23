@@ -1,0 +1,50 @@
+You are a competitive programmer. You will be given a specific interactive problem to solve (“Chameleon”) and must implement a correct and efficient C++ solution. Follow all these requirements exactly:
+
+Goal:
+- There are 2N chameleons (IDs 1..2N). They come in N unknown color pairs (each color appears exactly twice, once per gender).
+- You can issue queries of the form: "Query k c1 c2 ... ck" (1 ≤ k ≤ 2N, c_i distinct). The judge replies with an integer.
+- You must output exactly N lines of the form: "Answer a b" where a and b are the two chameleons having the same original color.
+
+Critical interaction facts:
+- For a queried set S, the judge returns the number of distinct displayed colors among the attendees.
+- Importantly, regardless of the hidden “love” permutation, for any set S the returned number equals the number of distinct original colors represented among S (i.e., the number of color pairs that S intersects). This is the only information you need to recover the pairs; “love” details are irrelevant to the logic.
+
+Constraints:
+- 2 ≤ N ≤ 500 (so total chameleons ≤ 1000).
+- You must not exceed 20,000 Query operations.
+- After every output (Query or Answer), you must flush.
+- The judge is non-adaptive.
+- IDs are 1-based, between 1 and 2N.
+
+Required algorithm (guaranteed to fit within the query limit and be correct):
+- Maintain a dynamic set “active” containing at most one representative from each unfinished color pair (i.e., colors for which you have seen exactly one chameleon so far).
+- Process chameleons in order v = 1..2N:
+  1) If active is empty, add v to active (no query needed).
+  2) Otherwise, issue one detection query with the entire current active plus v:
+     - Query: S = active ∪ {v}. Let res be the reply.
+     - If res == |active| + 1, then v introduces a new color not represented in active → add v to active.
+     - If res == |active|, then v matches the color of exactly one element in active. Find which one via binary search on active:
+       - While the candidate subset C of active has size > 1:
+         - Split C into halves H and R.
+         - Query H ∪ {v}. If the reply equals |H|, the match is in H; else it’s in R.
+       - When one remains (u), you have found the pair (u, v). Output "Answer u v" and remove u from active.
+- Correctness rationale:
+  - Since active always contains at most one representative per color, for any subset A of active:
+    - Query(A ∪ {v}) returns |A| if and only if v shares a color with some member of A; otherwise it returns |A| + 1.
+  - This supports the binary search invariant.
+- Query complexity:
+  - At most one detection query per chameleon (≤ 2N).
+  - A binary search only when v matches an existing representative, which happens exactly N times, costing ⌈log2 |active|⌉ per match, so total ≤ N⌈log2 N⌉.
+  - For N ≤ 500, total queries ≤ 2N + N⌈log2 N⌉ ≤ 1000 + 500*9 = 5500, safely within 20,000.
+
+Implementation details:
+- Read N from stdin.
+- For each Query, print: "Query k c1 c2 ... ck" exactly (space-separated), then flush, then read the integer reply.
+- For each discovered pair, immediately print: "Answer a b" (two distinct IDs with the same color), then flush. Print exactly N such lines in total. It’s okay to interleave Answers with further Queries.
+- Never print anything else (no debug text).
+- Always ensure the queried list has distinct valid IDs and correct k.
+- Use fast I/O; endl flushes automatically, or use cout.flush() after each line.
+- The program should terminate cleanly after outputting N Answer lines.
+
+Output format requirement for this chat:
+- Your response must ONLY contain the C++17 code, wrapped in ```cpp ... ``` with no extra text before or after.

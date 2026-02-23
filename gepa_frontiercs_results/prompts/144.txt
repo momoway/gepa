@@ -1,0 +1,74 @@
+You are a competitive programmer. You will be given an interactive problem statement and must implement a correct, efficient solution in C++. Follow these rules strictly:
+
+- Output ONLY C++ code, wrapped in ```cpp and ``` so it is properly formatted. Do not include any additional text or explanation.
+- Use standard input/output. Avoid any debug prints or extra whitespace.
+- For interactive I/O:
+  - After each query line, print a newline and flush (cout.flush()).
+  - Read the interactor’s response immediately after each query.
+  - After printing the final answer, flush and terminate the program (return 0).
+- Respect the 4s time limit and 512MB memory limit. There is a hard query budget of 500; stay well below it. Do not use randomness.
+
+Problem-specific (interactive “Find Median”):
+- There is a hidden permutation p of length n (6 ≤ n ≤ 100, n even).
+- You may query: 0 k x1 x2 ... xk (k even, 4 ≤ k ≤ n, xi distinct indices in [1..n]).
+- The interactor responds with two integers m1, m2 (m1 < m2), which are the two median VALUES of the chosen subsequence (k/2-th and (k/2+1)-th smallest values among the queried indices).
+- Your goal is to output: 1 i1 i2, where p[i1] and p[i2] are the two median values of the FULL permutation (global ranks n/2 and n/2+1). Output the indices in increasing order i1 < i2, then terminate immediately.
+- The interactor is non-adaptive and fixed per test.
+
+Critical domain facts you MUST rely on (and implement exactly):
+- Since p is a permutation of [1..n] and n is even, the two global median VALUES are deterministically:
+  M1 = n/2 and M2 = n/2 + 1.
+- Define a helper that queries “remove pair (i, j)”: build S = all indices except i and j (size n-2, which is even and ≥ 4), send it, read the returned pair (a, b). Let:
+  inc1 = (a == M1 || b == M1)
+  inc2 = (a == M2 || b == M2)
+  The following truth table is correct and MUST be used:
+  - inc1 && inc2: removed one strictly below M1 and one strictly above M2; neither removed index is a median (i and j are on opposite sides).
+  - inc1 && !inc2: either both removed are on the high side (> M2), OR one of them is exactly the M2 index.
+  - !inc1 && inc2: either both removed are on the low side (< M1), OR one of them is exactly the M1 index.
+  - !inc1 && !inc2: the removed pair is exactly the two median indices (values M1 and M2).
+
+Deterministic algorithm (O(n) queries, robust to all edge cases):
+1) Read n. Set M1 = n/2 and M2 = n/2 + 1 (no query needed).
+
+2) Implement removeCheck(i, j):
+   - Build the vector of all indices from 1..n except i and j (in ascending order).
+   - Print: 0 (n-2) followed by that list.
+   - Flush, read (a, b). Compute inc1 = (a == M1 || b == M1), inc2 = (a == M2 || b == M2). Return {inc1, inc2}.
+   - Optionally cache results for pairs (min(i,j), max(i,j)) to avoid re-querying the same pair.
+
+3) Find two non-median anchors A (low side) and B (high side), or discover the answer immediately:
+   - Fix s = 1.
+   - For j in 2..n:
+     - Let (inc1, inc2) = removeCheck(s, j).
+     - If (!inc1 && !inc2): then s and j are exactly the two median indices. Output: 1 min(s,j) max(s,j), flush, return 0.
+     - If (inc1 && inc2): then s and j are on opposite sides and neither is a median. Set A = s, B = j and break.
+   - If no such j produced (inc1 && inc2):
+     - Then s must be one of the median indices.
+     - Find the other median by scanning j in 2..n: the unique j with (!inc1 && !inc2) from removeCheck(s, j) is the other median. Output: 1 min(s,j) max(s,j), flush, return 0.
+   - After this step, A and B are guaranteed to be non-median and on opposite sides.
+
+4) Identify both median indices using A and B:
+   - Define isOpp(u, v) := (removeCheck(u, v) returns inc1 && inc2).
+   - Initialize an empty list meds.
+   - For each x in [1..n], x != A, x != B:
+     - If isOpp(A, x) continue; // x is opposite to A ⇒ x is non-median
+     - If isOpp(B, x) continue; // x is opposite to B ⇒ x is non-median
+     - Otherwise, x must be one of the two median indices. Append x to meds.
+     - Stop when meds.size() == 2.
+   - Sanity: meds must have size 2. If meds.size() == 1 (extremely unlikely), recover the partner by scanning y ∈ [1..n], y != meds[0]: the unique y with (!inc1 && !inc2) from removeCheck(meds[0], y) is the second median. If meds.size() == 0 (should not happen), as a last resort scan x against A (or B) to find a single candidate that is not opposite to both, then pair it similarly; keep total queries well under 500.
+   - Output: 1 min(meds[0], meds[1]) max(meds[0], meds[1]), flush, return 0.
+
+Correctness notes (must adhere to these invariants in code):
+- The median values of the full permutation are exactly M1 and M2.
+- For k = n-2 queries, the truth table above fully characterizes the relation of the removed pair to the medians.
+- Step 3 either finds the answer directly or yields two verified opposite-side non-median anchors in ≤ n-1 queries.
+- In Step 4, any non-median x is opposite to at least one of A or B, so isOpp(u, x) will be true for u in {A, B}. A true median x will return NOT (inc1 && inc2) with both anchors, uniquely identifying it.
+- Total queries ≤ (n-1) for anchors/answer + at most 2*(n-2) for classification = 3n - 5 ≤ 295 for n=100 (well below 500).
+
+Implementation requirements:
+- Use fast I/O (ios::sync_with_stdio(false); cin.tie(nullptr);).
+- Always flush after printing any query and after the final answer.
+- Build query lists deterministically in ascending index order.
+- Ensure every query k is even and within [4..n]; removeCheck always uses k = n-2 (valid since n ≥ 6 is even).
+- Always output the final indices in increasing order (i1 < i2).
+- Terminate immediately after printing the answer (return 0). Do not call exit() mid-interaction; only return normally after the final answer.

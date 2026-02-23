@@ -1,0 +1,89 @@
+You are a competitive programmer. Produce a single C++17 solution file that solves the following interactive problem. Your output must be ONLY a single C++ source file wrapped in ```cpp fences, with no extra text before or after the fences. During execution, your program must print only the queries and the final guess in the exact required formats, without any debug text. Always flush stdout after each printed query or guess.
+
+Interactive problem summary (embed these rules into your program logic; do not assume the problem statement will be available at runtime):
+- There is an unknown integer n with 2 ≤ n ≤ 1e9.
+- A query is a line: 0 m x1 x2 ... xm
+  - m ≥ 1 is the number of integers in this query.
+  - Each xi is an integer in [1, 1e18].
+- After printing a query and flushing, read one integer x from stdin:
+  - x equals the total number of hash collisions that occur when inserting the sequence (x1..xm) into an initially empty unordered_set in order.
+  - A collision occurs for each unordered pair (i, j), i < j, with xi ≡ xj (mod n), i.e., when n divides (xi − xj).
+- All queries are independent (fresh empty set each time).
+- To submit the final answer, print one line: 1 n_guess, flush, then exit immediately. The guess does not count towards the query cost.
+- If the interactor returns −1 or input read fails (EOF), exit immediately to avoid TLE.
+- Total “cost” is the sum of m across all queries. Keep it ≤ 1,000,000 (hard limit). Aim to stay under ~950,000 to be safe.
+
+Key approach to recover n using this collision-count oracle:
+- If a set S has collisions(S) > 0, then there exists at least one pair x, y in S with x ≡ y (mod n). For such a pair, d = |x − y| is a multiple of n.
+- By finding differences d1, d2, ... from independent colliding pairs and taking G = gcd(d1, d2, ...), with high probability G = n. To make this exact even if G is a multiple of n, factor G and test divisibility using tiny (m=2) queries to shrink G down to n.
+
+Required high-level strategy:
+1) Random sampling to induce at least one collision:
+   - Generate K distinct random 64-bit integers in [1, 1e18] using mt19937_64.
+   - Recommended K ≈ 35,000 to 38,000. This gives a high chance (>70% for n=1e9) to contain at least one collision while keeping cost manageable.
+   - Ensure all numbers in a query are distinct (use an unordered_set to deduplicate).
+   - Query collisions(V) once for the whole set V. If 0, resample a fresh V (with a fresh RNG sequence) and try again (e.g., up to 3–5 attempts). Keep total cost budget in mind.
+
+2) Find one explicit colliding pair from a set with collisions:
+   - Given a vector V with collisions(V) > 0, locate a specific colliding pair (x, y) efficiently.
+   - Use a group-testing approach with careful budgeting:
+     a) Split current set S into two halves A and B (disjoint, cover S).
+     b) Query collisions(A). If > 0, set S = A and continue.
+     c) Otherwise query collisions(B). If > 0, set S = B and continue.
+     d) Otherwise, both A and B have zero internal collisions, so the colliding pair lies across A and B. Switch to a “cross localization” phase:
+        - Maintain two disjoint sets P and Q with collisions(P)=collisions(Q)=0 and collisions(P ∪ Q) > 0.
+        - While |P| > 1 or |Q| > 1:
+          - If |P| ≥ |Q|, split P into P1 and P2. Query collisions(P1 ∪ Q). If > 0, set P = P1; else P = P2.
+          - Else (|Q| > |P|), split Q into Q1 and Q2. Query collisions(P ∪ Q1). If > 0, set Q = Q1; else Q = Q2.
+        - When |P| = |Q| = 1, return that pair (x, y).
+     - Important: Build queries for unions by directly printing the concatenation of the elements of the two subsets (no duplicates), and rely on the invariant that each subset alone has zero internal collisions, so the returned count equals the number of cross-colliding pairs between them.
+     - Do not recompute unnecessary collision counts; only ask what is needed. This scheme typically uses O(|S|) total printed elements to find a pair, not O(|S| log |S|).
+
+3) Derive n from differences robustly:
+   - For each found colliding pair (x, y), let d = |x − y|; then n | d.
+   - Maintain G = gcd of these differences over a few independent runs (e.g., 2–3 differences).
+   - To ensure exact recovery even if G is a multiple of n, reduce G by testing its prime factors:
+     - Factor G into primes using a fast 64-bit factorization (Pollard’s Rho + Miller–Rabin). This is necessary since G can be up to 1e18.
+     - For each prime factor p of G (with multiplicity), test whether G/p is still divisible by n:
+       - Pick any c in [1, 1e18 − (G/p)]. Query the pair {c, c + G/p} by printing: 0 2 c (c + G/p).
+       - If the reply is 1 (a collision), then n | (G/p); set G = G/p and repeat testing the same prime p (handle multiplicities).
+       - Otherwise, move to the next prime factor.
+     - After processing all prime factors, G becomes exactly n.
+   - This refinement uses only O(number of prime factors of G) queries with m=2 each, negligible versus budget.
+
+4) Cost and safety:
+   - Track the total cost (sum of m) and keep it under ~950,000 to leave room for refinement queries and the final guess.
+   - Example budgeting: K=36,000, 1–2 attempts to get a collision (≈36–72k), localization per pair ≈ 1–2 × K (≈36–72k), repeat for 2–3 pairs (≈150–250k). Plus a handful of m=2 refinement tests. Overall stays well below 1e6.
+   - If input read fails or −1 is received at any point, exit immediately.
+   - If budget is nearly exhausted but you have some G ≥ 2, submit 1 G and exit. If G < 2 (no data), submit 1 2 as a fallback (still exit immediately).
+
+Implementation details and constraints:
+- Language: C++17. Use fast IO: ios::sync_with_stdio(false); cin.tie(nullptr).
+- Always flush after printing any query or the final guess: cout.flush().
+- Read exactly one integer reply after each query. If reading fails or the reply is −1, exit(0).
+- Never print any extra whitespace lines or debug text. Only:
+  - Queries: “0 m x1 x2 ... xm”
+  - Final guess: “1 n”
+- Use uint64_t for values in [1, 1e18]. Differences and gcd fit in 64-bit. Use unsigned __int128 for intermediate modular multiplications in Pollard’s Rho/Miller–Rabin to avoid overflow.
+- Ensure all generated numbers in a single query are distinct.
+- Random generation: use mt19937_64, seeded with a high-entropy seed (e.g., time + address).
+- Query builders:
+  - Implement ask(const vector<uint64_t>& v) to print a full vector.
+  - Implement askSlice(v, l, r) to print a contiguous slice without copying.
+  - Implement askUnion(v, l1, r1, l2, r2) to print union of two slices. Alternatively, maintain vectors of indices for P and Q and print their elements directly to avoid copying.
+- Pair localization:
+  - Start with S = V when collisions(V) > 0.
+  - On each binary split, first test A; only test B if A has zero collisions.
+  - When switching to cross-localization, maintain invariants collisions(P)=collisions(Q)=0 and collisions(P ∪ Q) > 0. Each iteration halves the larger side with a single query.
+  - Stop when P and Q are singletons and return |x − y|.
+- GCD refinement with factorization:
+  - Implement Miller–Rabin for 64-bit primality (deterministic bases for 64-bit).
+  - Implement Pollard’s Rho to factor 64-bit integers quickly.
+  - Factor G, sort prime factors, and iteratively test divisibility by shrinking G using m=2 queries as described above.
+
+Output requirements for this ChatGPT session (very important):
+- Your final answer must be ONLY a single C++17 source file wrapped in ```cpp fences, with no extra commentary or explanation outside those fences.
+- Inside the code, do not print any comments or debug output at runtime. Printing comments in source is allowed, but do not print them to stdout during execution.
+- After printing the final answer “1 n”, flush and return 0 immediately.
+
+Follow these instructions precisely to avoid WA/TLE and to stay within the interaction protocol and cost budget.

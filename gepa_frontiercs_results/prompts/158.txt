@@ -1,0 +1,118 @@
+You are a competitive programmer. Implement a robust, deterministic C++17 solution for AtCoder Heuristic Contest 012 (AHC012) “Strawberry Cutting”.
+
+Your response must be ONLY valid C++17 source code wrapped in ```cpp and ``` with no extra text.
+
+Task summary (precise, domain-specific):
+- A circular cake (disk) centered at (0,0) with radius R = 10^4.
+- N strawberries with integer coordinates (x_i, y_i), each strictly inside the disk: x_i^2 + y_i^2 < 10^8, so x_i, y_i ∈ [-9999, 9999].
+- The Euclidean distance between any two strawberries is > 10 (guarantees no near-collisions).
+- K is the maximum number of straight cuts; it is provided per test (official tests use K = 100).
+- A cut is an infinite straight line specified by two different integer points (p_x, p_y), (q_x, q_y) with -1e9 ≤ coordinates ≤ 1e9. Points may lie outside the cake.
+- If a cut passes exactly through a strawberry’s center, the strawberry belongs to no piece.
+- For d=1..10, we are given a_d (# attendees with d years). Let b_d be the number of cake pieces with exactly d strawberries. We want to maximize S = sum_{d=1..10} min(a_d, b_d).
+- N = sum_{d=1..10} d*a_d; each a_d is in [1,100]. There are 100 test cases in the judge; if any test case is WA (invalid output format or constraints broken), the total score is zero.
+
+Hard constraints to avoid WA:
+- Never exceed K cuts.
+- Output format exactly:
+  - First line: k (0 ≤ k ≤ K).
+  - Next k lines: p_x p_y q_x q_y, two distinct endpoints, all integers within [-1e9, 1e9].
+- Do not output anything else (no debug, no comments).
+- Endpoints per line must be distinct (p != q).
+- Do not produce duplicate lines:
+  - Maintain separate “used” sets for chosen vertical x positions and horizontal y positions to avoid duplicates within each axis.
+  - Before printing, sort and deduplicate verticals and horizontals again, and ensure k matches the exact number of printed lines.
+- Prefer to avoid placing a line at any strawberry coordinate to avoid deleting strawberries:
+  - For vertical lines x = c, ensure c != any x_i.
+  - For horizontal lines y = c, ensure c != any y_i.
+  - This is not required for validity but generally improves score and is easy because many integer coordinates are free in [-9999,9999].
+
+Scoring proxy for optimization (safe simplification):
+- Use only axis-aligned cuts: vertical x = c, horizontal y = c. This makes endpoints trivial and avoids precision issues.
+- Given Lx vertical and Ly horizontal lines (Lx + Ly ≤ K), define a grid with (Lx + 1) × (Ly + 1) rectangular cells. A strawberry belongs to the cell determined by counts of lines strictly less than its coordinates; compute with lower_bound on sorted positions.
+- Compute b_d as the number of cells with exactly d strawberries (for d=1..10). Use S = sum min(a_d, b_d) as the proxy objective.
+- You do NOT need to model the circular boundary of the disk to compute this proxy: counting strawberries per grid cell is sufficient for optimization. Validity of the cuts is unaffected.
+
+I/O and robustness:
+- Read input from stdin:
+  - N K
+  - a_1 a_2 ... a_10
+  - N pairs of (x_i, y_i)
+- Use standard C++ fast I/O (e.g., ios::sync_with_stdio(false); cin.tie(nullptr);).
+- Use 64-bit integers (long long) for coordinates and output. All arithmetic for indexing and bounds stays within safe limits.
+- If input cannot be read, safely output k=0.
+
+Deterministic randomness:
+- Use a fixed 64-bit RNG (e.g., SplitMix64 or xorshift) seeded deterministically from the input (combine N, K, sums/mins/maxs of x_i and y_i, and a_d) to ensure reproducibility across runs. Do not use time-based seeds.
+
+Domain for placing lines:
+- Restrict vertical/horizontal line positions to integers within [-R+1, R-1] = [-9999, 9999] to ensure they meaningfully cut the disk.
+- Endpoints for vertical lines: (c, -1e9) to (c, 1e9).
+- Endpoints for horizontal lines: (-1e9, c) to (1e9, c).
+- These endpoints ensure distinct points and always lie in the valid range.
+
+Forbidden and used sets:
+- Build forbidden sets for x and y (all x_i and all y_i). Never place a line exactly at a forbidden coordinate.
+- Maintain separate “used” sets for chosen vertical x positions and horizontal y positions to avoid duplicates.
+- Ensure “used” is respected during candidate generation and local improvements to prevent duplicates from arising mid-process.
+
+Adjust function (critical for safety):
+- Given a target integer t in [-9999, 9999] and the axis’s used/forbidden sets, return the nearest available integer within [-9999, 9999] that is not forbidden and not used.
+- Search outward by radius d = 0,1,2,… checking t, t-1, t+1, t-2, t+2, … until success.
+- If the local search somehow fails (shouldn’t), scan the whole domain to find a valid slot (still avoiding forbidden and used).
+- Never fall back to a forbidden coordinate.
+
+Candidate generation (try multiple (Lx, Ly) under K and keep the best by the proxy):
+- Build a pool of (Lx, Ly) pairs with Lx + Ly ≤ K. Include balanced and imbalanced pairs such as:
+  - (K, 0), (0, K), (K/2, K/2), (K/3, 2K/3), (2K/3, K/3), (K/4, 3K/4), (3K/4, K/4).
+  - Also sweep a coarse set: for Lx in {0, step, 2*step, …, K} with step ≈ max(1, K/10), include (Lx, K - Lx).
+- Also include pairs guided by target average strawberries per cell μ ∈ {0.8, 1.0, 1.2, 1.6, 2.0, 2.6, 3.2, 4.0, 5.0}:
+  - Target cells C ≈ round(N / μ). For Lx from 0..K with stride ≈ max(1, K/8), set Ly ≈ round(C/(Lx+1)) - 1 and consider small adjustments ±2 while respecting Lx + Ly ≤ K.
+- Deduplicate (Lx, Ly) pairs.
+
+Line placement strategies for each (Lx, Ly) (try several and keep the best):
+1) Quantile-based grid:
+   - Sort x_i and y_i into arrays xs and ys.
+   - For j=1..Lx, target vertical position near xs[floor(j*N/(Lx+1))] plus small integer jitter in [-7,7], then adjust via the Adjust function.
+   - For j=1..Ly, target horizontal position near ys[floor(j*N/(Ly+1))] plus small integer jitter in [-7,7], then adjust.
+   - Attempt a few retries with fresh jitter to escape collisions.
+2) Uniform grid:
+   - For L lines on an axis, set a uniform step = floor(20000.0/(L+1)). Base positions are -9999 + round(i*step), i=1..L, plus a small jitter within [-step/3, step/3], then adjust.
+3) KD-style balanced splits:
+   - Place Lx vertical lines at x-quantiles to split strawberries into ≈ equal-count columns (≈ N/(Lx+1) each).
+   - Then place Ly horizontal lines at global y-quantiles with adjust.
+
+Evaluation:
+- For a given set of vertical positions vx and horizontal positions vy:
+  - Sort copies of vx and vy.
+  - For each strawberry (xi, yi), compute cx = lower_bound(vx, xi), cy = lower_bound(vy, yi), and increment cell count at index cx*(Ly+1) + cy.
+  - Build histogram b_d for d=1..10 by counting cells with exactly d strawberries.
+  - Compute S = sum_{d=1..10} min(a_d, b_d). Use 64-bit for the score.
+
+Local improvement (small, safe, fast):
+- After selecting the best candidate grid by proxy, run a brief hill-climbing under a soft time budget:
+  - While within the budget, pick one random line (vertical or horizontal), attempt to move it by a small integer delta in {±1, ±2, ±3, ±4, ±5, ±6, ±7, ±8}, and accept the move if S does not decrease.
+  - Always maintain constraints during tentative moves:
+    - Stay within [-9999, 9999].
+    - Avoid forbidden coordinates (x_i for vertical, y_i for horizontal).
+    - Avoid duplicates by using and updating the per-axis used sets correctly (clear the old position before searching for a new one; if rejected, restore).
+  - Recompute the full score S after each tentative move (O(N log K) is fine for N ≤ 5500 and K ≤ 100).
+
+Time budget:
+- Keep the total running time ≤ ~2 seconds. A typical safe budget: ~1800 ms total, with ~1200–1400 ms for candidate generation and ~300–500 ms for local tweaks.
+- Use chrono::steady_clock to gate loops deterministically. If the environment clock is unavailable, also cap loops to modest counts.
+
+Output:
+- After selecting the final set of lines, ensure |vx| + |vy| ≤ K (trim from the end if necessary).
+- Sort and deduplicate vx and vy again immediately before output to guarantee no duplicate lines; recompute k accordingly.
+- Print:
+  - First line: k = |vx| + |vy|.
+  - Next k lines:
+    - For each vertical line x=c: print “c -1000000000 c 1000000000”.
+    - For each horizontal line y=c: print “-1000000000 c 1000000000 c”.
+- No extra output. Newlines/spaces are fine; avoid any additional prints.
+
+Safety/fallback:
+- Always include the zero-cuts candidate (k=0) as a valid fallback in case all heuristics fail.
+- Ensure determinism by fixing RNG seed from input; do not use time-based randomness.
+- Validate before printing that every line uses two distinct integer endpoints within [-1e9,1e9].

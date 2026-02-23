@@ -1,0 +1,127 @@
+You are a competitive programmer. You will be given a problem statement and must implement a solution in C++. Your output must be ONLY the C++ code, wrapped between ```cpp and ``` with no additional explanation or text.
+
+Task: Solve the interactive Codeforces problem “Hidden Bipartite Graph” using subset-edge queries. This is a true interactive problem. Your program must send queries exactly as specified, flush after each query, and read the judge’s replies immediately. Never attempt to read all input up-front, never simulate the judge, and never print any extra output.
+
+Interactive protocol
+- First, read a single integer n (1 ≤ n ≤ 600) — the number of vertices.
+- To query a subset S (1 ≤ |S| ≤ n):
+  - Print exactly two lines:
+    - Line 1: "? k" where k = |S|.
+    - Line 2: k distinct integers in [1..n] — the elements of S.
+  - Immediately flush after printing the query (after line 2).
+  - Then read an integer m — the number of edges with both endpoints inside S.
+  - If m == -1 at any time, terminate the program immediately (exit(0)).
+
+Final answer format (print and then terminate):
+- If the graph is bipartite:
+  - Line 1: "Y s" where s = size of one partition (0 ≤ s ≤ n).
+  - Line 2: s distinct integers (1-based) of that partition.
+- If the graph is not bipartite:
+  - Line 1: "N l" where l is the length of an odd simple cycle (3 ≤ l ≤ n).
+  - Line 2: l distinct integers forming the cycle in order (1-based).
+
+Strict constraints and rules
+- You may ask at most 50000 queries total. Keep well below this.
+- Never issue a query with k = 0. For sets of size 0 or 1, the number of internal edges is known to be 0; do not query in that case.
+- Do not print any extra characters or debug output. Print only the required lines.
+- Always flush after every query and after the final answer.
+- Use 1-based vertex labels everywhere.
+- Immediately exit if any read returns -1, or if reading fails.
+
+Critical implementation notes and pitfalls learned from prior attempts
+- ALWAYS keep every queried subset S sorted in strictly increasing order. This is essential both for correctness of memoization and to avoid re-asking the same logical set in a different order, which can explode the query count and cause “too many queries” verdicts.
+- NEVER build query sets by push_back followed by inplace_merge or any other approach that might leave S unsorted. Use a helper that inserts into a sorted vector using lower_bound so the vector remains sorted. Ensure elements are unique.
+- Memoize ask(S) results using a canonical key derived from the sorted S (e.g., join sorted elements with single spaces, no trailing space). If S is always sorted, the same logical set will always have the exact same key, ensuring cache hits and preventing redundant queries.
+- Do NOT use cross-subset counting patterns like cross_count(U,B) = ask(U∪B) - ask(U) - ask(B) over large, changing subsets in outer loops. That strategy tends to multiply queries. Instead, strictly follow the robust incremental algorithm below that attaches each new vertex to at most one previously processed vertex, with O(log n) binary search per attached vertex.
+- IMPORTANT fix over previous attempts: When you detect non-bipartiteness by finding a color class with internal edges, you MUST locate that internal edge inside a single forest tree (component of the built forest). Otherwise you can end up with an edge whose endpoints lie in different forest trees, and then there is no path in the forest to reconstruct an odd cycle — causing a wrong answer. To avoid this, after coloring the forest, check each forest tree separately: query the color-0 subset within that tree and the color-1 subset within that tree to find a violating tree; then find an explicit internal edge (a, b) within that tree only. Reconstruct the odd cycle along the forest path in that same tree.
+
+Robust, query-efficient algorithm
+
+1) Query helper with memoization: ask(S)
+- Input: a vector<int> S of distinct vertices (1-based), kept sorted.
+- If |S| ≤ 1: return 0 without printing a query or reading input.
+- Else:
+  - Use a cache (unordered_map) from a canonical key of S (e.g., join sorted elements with spaces) to its ask(S) value to avoid re-querying the same subset.
+  - If not cached, print:
+    - "? k"
+    - "s1 s2 ... sk"
+    - Then flush and read m.
+    - If m == -1 or input fails, exit(0).
+    - Cache and return m.
+
+2) Build a sparse spanning forest incrementally (handle disconnected graphs)
+- Maintain:
+  - U: the sorted list of processed vertices.
+  - eU: ask(U) — the number of edges entirely inside U (0 for |U| ≤ 1).
+  - A forest adjacency list g[1..n], initially empty.
+- For v from 1..n:
+  - Uplus = U with v inserted in sorted position (keep sorted).
+  - mUp = ask(Uplus).
+  - degU = mUp - eU (the number of edges from v to U).
+  - If degU == 0:
+    - No neighbor in U. Do not add any edge to the forest for v (v becomes a new tree root).
+    - Set U ← Uplus and eU ← mUp.
+  - If degU > 0:
+    - Find one neighbor u ∈ U via binary search on U:
+      - Let W = U (a working sorted list).
+      - While |W| > 1:
+        - Split W into halves A and B (disjoint, both sorted; if one half is empty, take the other).
+        - Compute dA = ask(A ∪ {v}) - ask(A). Build A ∪ {v} by inserting v into a sorted copy of A using lower_bound.
+        - If dA > 0: W ← A; else W ← B.
+      - Now W has one element u — a neighbor of v.
+    - Add the forest edge (u, v) to g in both directions.
+    - Set U ← Uplus and eU ← mUp.
+
+3) 2-color the forest and record tree structure
+- Perform BFS/DFS over the forest edges to assign color 0/1 to all vertices. Since the graph may be disconnected, start a BFS/DFS from every uncolored vertex as a root.
+- Maintain parent[] and depth[] for each vertex for later path reconstruction.
+- Also assign a component id (compId[]) or record the root of the tree for each vertex so you can group vertices by forest tree.
+
+4) Check bipartiteness with subset-edge queries (per tree to ensure correct odd-cycle reconstruction)
+- For each forest tree (component), build its local color classes S0 (color 0) and S1 (color 1), both sorted.
+- If ask(S0) > 0 or ask(S1) > 0 for any tree, the graph is not bipartite; remember which tree and which color class S caused the violation.
+- If for all trees, ask(S0) == 0 and ask(S1) == 0, the graph is bipartite:
+  - Let C0 be the global set of all color-0 vertices (sorted). Print:
+    - "Y |C0|"
+    - The vertices of C0 in any order (sorted is fine).
+  - Flush and terminate (exit(0)).
+
+5) Find an explicit internal edge (a, b) within the violating tree and color class
+- Let S be the violating color class inside a single forest tree (as found in step 4).
+- Find an explicit internal edge (a, b) ⊂ S using an incremental set T and binary search:
+  - Initialize T = empty (sorted) and eT = 0.
+  - For each x in S (iterate in increasing order):
+    - Tx = T ∪ {x} (insert x into a sorted copy of T).
+    - ex = ask(Tx); d = ex - eT.
+    - If d == 0: set T ← Tx and eT ← ex.
+    - Else (d > 0): x has a neighbor in T. Find one neighbor y ∈ T by binary search:
+      - Let W = T. While |W| > 1:
+        - Split W into halves A and B (both sorted; if a half is empty, take the other).
+        - dA = ask(A ∪ {x}) - ask(A). Build A ∪ {x} by inserting x into a sorted copy of A.
+        - If dA > 0: W ← A; else W ← B.
+      - Now W has one element y; set a = y, b = x. Break.
+
+6) Construct a simple odd cycle using the forest path between a and b
+- Since a and b are in the same color class, the tree distance between them in the forest is even; adding edge (a, b) closes an odd cycle.
+- Reconstruct the simple path from a to b in the forest using parent[] and depth[] (both a and b are guaranteed to be in the same forest tree by step 4):
+  - Move the deeper vertex up until depths match, recording nodes on each side.
+  - Then move both up until they meet at LCA, recording nodes for both sides.
+  - Concatenate a-side (down to LCA), then LCA once, then reversed b-side to form the path a→...→b.
+- Output:
+  - "N l" where l is the number of vertices on that path.
+  - The l vertices along the path from a to b in order (the implicit closing edge b→a makes the odd cycle).
+  - Flush and terminate.
+
+Implementation details
+- Use 1-based indices everywhere.
+- Keep all queried subsets sorted to ensure stable memoization keys and low query counts.
+- Never query sets of size 0 or 1; ask(S) must early-return 0 in those cases without printing or reading.
+- Memoize all ask(S) results using a robust canonical key (e.g., string of sorted elements joined by spaces). With n ≤ 600 this is safe.
+- In all binary searches, compute differences using memoized ask to avoid redundant queries. Build A ∪ {v} by inserting v via lower_bound into a copy of A to keep it sorted and unique.
+- Maintain eU = ask(U) across the forest-building loop; compute degU = ask(U ∪ {v}) - eU to decide if v has any neighbor in U.
+- After printing any query, print a newline after the second line and flush: cout << '\n'; cout.flush(); Then immediately read m and handle -1.
+- After printing the final answer, flush and terminate immediately (exit(0)).
+- Do not print any extra spaces/lines beyond what is required. No debug prints.
+
+Output rule for this task:
+- Your response must ONLY contain the C++ source code in a single block delimited by ```cpp and ```.

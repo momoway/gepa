@@ -1,0 +1,176 @@
+You are a competitive programmer. You will be given a problem statement; implement a solution in C++ that respects the stated execution time and memory limits. Wrap the code in ```cpp and ```; your response must ONLY contain the C++ code with no extra text.
+
+Task: Clique Cover Challenge (heuristic/approximate). Given an undirected graph G = (V, E) with N up to 500, assign an integer id[i] ≥ 1 to each vertex so that vertices sharing the same id form a clique in G. Minimize the number of ids (K = max id[i]). A clique cover in G is equivalent to a proper coloring in the complement graph Ḡ.
+
+Input format:
+- First line: N M
+  - 2 ≤ N ≤ 500
+  - 1 ≤ M ≤ N*(N-1)/2
+- Next M lines: edges u v (1 ≤ u, v ≤ N, u ≠ v)
+- Multiple edges may appear; treat them as one; ignore self-loops if any.
+
+Output format:
+- Exactly N lines: id[i] (1-indexed, contiguous after optional compression). Validity requires: if id[u] = id[v], then {u, v} ∈ E.
+
+Scoring:
+- K* = optimal minimum number of cliques (unknown)
+- Your score = (K* / K) * 100. Invalid solutions get 0.
+
+Constraints/Performance targets:
+- Time limit ~2.0s; aim to stop all computation around 1.88–1.94s wall-clock.
+- Memory limit ~512MB. N ≤ 500 allows dense bitset operations.
+- Fast I/O; avoid recursion.
+
+Graph representation (critical for speed):
+- Use bitset over 64-bit blocks: vector<uint64_t> per vertex; size B = ceil(N/64).
+- Maintain:
+  - adj[v]: adjacency in G (adj[v][u] == 1 iff {v,u} ∈ E). Ensure adj[v][v] == 0.
+  - comp[v]: adjacency in complement Ḡ = all1_mask ^ adj[v], with self-bit cleared.
+- Maintain maskAll per block B: all 1s, except the high unused bits in the last block zeroed (lastMask = (1ULL<<rem)-1 for rem=N%64, or ~0ULL if rem==0).
+- Build complement:
+  - comp[v][b] = maskAll[b] ^ adj[v][b]; then clear self-bit comp[v][v] = 0.
+- Degrees:
+  - degG[v] = popcount(adj[v]); degC[v] = popcount(comp[v]).
+  - popcount via __builtin_popcountll.
+
+Key data layout details to avoid type errors:
+- colBits is a vector<vector<uint64_t>> of size K, each colBits[c] is a single bitset (vector<uint64_t>) over vertices.
+- Functions that operate on a "color set" must take a single bitset: const vector<uint64_t>& (NOT vector<vector<uint64_t>>&).
+  - Example correct signatures:
+    - bool conflictWithSet(const vector<vector<uint64_t>>& comp, int v, const vector<uint64_t>& setBits, int B);
+    - bool canJoin(const vector<vector<uint64_t>>& comp, int v, const vector<uint64_t>& setBits, int B);
+    - int countBlockers(const vector<vector<uint64_t>>& comp, int v, const vector<uint64_t>& setBits, int B);
+    - int findOneBlocker(const vector<vector<uint64_t>>& comp, int v, const vector<uint64_t>& setBits, int B);
+- When calling these, pass colBits[t] (a single vector<uint64_t>), NOT the whole colBits.
+
+Construction heuristics (multi-heuristic, multi-start):
+Implement several independent builders to create diverse initial clique covers; after each build, run local improvement. Keep the best valid solution found within time.
+
+A) DSATUR on complement (coloring Ḡ):
+- Choose an uncolored vertex with the highest saturation degree (number of distinct colors among its neighbors in Ḡ).
+- Tie-breaks: higher degree in Ḡ (degC), then higher degree in G (degG), then randomized (or by index).
+- Assign the smallest feasible color not used by its neighbors in Ḡ.
+- Data structures:
+  - For each vertex, maintain used[v]: bitset over colors (size CB = ceil(N/64)) representing “used neighbor colors” to update saturation quickly.
+  - When coloring vertex v with color c, scan comp[v] block-wise; for each uncolored neighbor t, if we set used[t][c] bit from 0→1 then sat[t]++.
+- Build multiple DSATUR variants:
+  - Deterministic tie-break.
+  - Randomized tie-break among candidates with equal sat/deg to add diversity.
+  - Optional: break ties preferring colors that minimize the sum of future conflicts (estimate via neighbor counts per color).
+
+B) Greedy clique-packing directly in G (join-existing-clique):
+- Maintain K colors with:
+  - colBits[c]: bitset of members (vector<uint64_t> of size B),
+  - colSize[c]: size of color c.
+- Process vertices in various orderings (see Multi-start):
+  - For vertex v, try to place into an existing clique c if (comp[v][b] & colBits[c][b]) == 0 for all blocks b.
+  - Prefer the largest clique (by current size), then smallest index.
+  - If none fits, open a new clique.
+
+C) Greedy extraction of large cliques by intersection in G (disjoint packing):
+- Maintain unassigned bitset U (size B).
+- While U not empty:
+  - Pick a seed s from U (prefer low degC/high degG; randomize among top few).
+  - Start clique C = {s}; candidate = U ∩ N(s) (blockwise AND with adj[s]).
+  - While candidate not empty:
+    - Select u from candidate (heuristics: maximize |U ∩ N(u)| or minimize degC[u]; or random among top few).
+    - Add u to C; candidate &= adj[u] (blockwise AND), maintaining only vertices adjacent to all in C.
+  - Output C as a new color; remove C from U.
+- Repeat to create a partition. This often builds larger cliques than simple join.
+
+Orderings for greedy builders (diversity):
+- By descending degC (degree in complement), tie-break by degG, then index.
+- By descending degG (degree in original), tie-break by degC, then index.
+- Welsh–Powell order on complement (descending degC) for a simple greedy colorer on Ḡ (optional extra builder).
+- Multiple random permutations (shuffle or weighted by degrees).
+- Mix-in slight randomness within top-k choices to diversify.
+
+Local improvement (post-processing) to reduce K:
+Maintain for the current coloring:
+- colBits[c], colSize[c] as above.
+- forbOr[c]: OR over comp[u] for all u in color c (vector<uint64_t>) for quick merge checks.
+
+Implement the following passes with strict time caps:
+1) Recolor-down (iterative):
+   - For colors from high to low, for each vertex v in color c, try move to any t < c with (comp[v] & colBits[t]) == 0. If moved, update colBits/colSize/color. Do a few passes.
+
+2) Pairwise clique merge:
+   - Try merging color A into B if there are no complement edges between them:
+     - Equivalent to (forbOr[A] & colBits[B]) == 0 (symmetric).
+   - If merge succeeds, move all vertices from A to B, update structures, then compress colors; repeat while progress.
+
+3) Two-color Kempe chain on complement:
+   - If moving v from color a to b is blocked by exactly one neighbor u in color b in Ḡ, attempt a Kempe swap:
+     - Consider subgraph of Ḡ induced by colors {a,b}. BFS from v following edges of comp restricted to vertices of colors a or b.
+     - If u is not in the reached component, swap colors a↔b within the reached component; then v can move to b. Update colBits/colSize/color.
+   - Limit attempts (e.g., to vertices in top 30–40% highest color ids) and cap total swaps to stay within time.
+
+4) Targeted K-1 elimination attempt (optional but effective):
+   - Given current K, pick the highest color h = K-1 and try to eliminate it:
+     - For each v in color h, try direct move to any t < h.
+     - For single-blocker cases, apply Kempe with that t.
+     - If all vertices of h are reassigned, compress colors (K := K-1). Optionally repeat for next highest.
+   - Abort early if time is short.
+
+5) Small-depth blocker moves (optional): Try 1-step or 2-step recolor with strict caps if cheap.
+
+Implementation details and performance:
+- Bit operations:
+  - test/set/clear bits via shifts on vector<uint64_t>.
+  - Iterate set bits using x & -x and __builtin_ctzll.
+  - Always mask last block with lastMask where needed (maskAll[B-1]) so no stray bits beyond N.
+- DSATUR storage:
+  - used[v] is vector<uint64_t> size CB; set/check bit for color c via used[v][c>>6] and (1ULL<<(c&63)).
+- Moving a vertex v from color a to b:
+  - Update colBits[a], colBits[b] bitsets and colSize.
+  - If maintaining forbOr incrementally is complex, recompute forbOr for all colors when necessary (N ≤ 500 is fine).
+- Color compression:
+  - After moves/merges leaving empty colors, remap to contiguous [0..K-1] and rebuild colBits/colSize accordingly.
+- Validation (mandatory before considering as best and before output):
+  - For all colors c, verify no two vertices in c are adjacent in complement:
+    - Compute OR over comp[u] for u in c and ensure (OR & colBits[c]) == 0.
+  - If invalid, fallback to a trivial valid solution (unique color per vertex).
+
+Multi-start and time management:
+- Use multiple independent runs until time budget is exhausted; keep the best (smallest K) valid solution.
+- Recommended run plan within ~1.9s:
+  - DSATUR deterministic.
+  - DSATUR randomized (1–2 runs).
+  - Greedy clique-packing with degC/degG orders.
+  - Clique-extraction-by-intersection (2–4 starts with slight randomness).
+  - Several random starts (greedy packers and/or Welsh–Powell on complement).
+  - After each construction, apply the local improvement pipeline (recolor-down → merges → limited Kempe → recolor-down → merges → compress).
+- Stop around 1.88–1.94s (steady_clock); check deadline at safe intervals in loops.
+
+Coding requirements:
+- Single-file C++17 solution.
+- Fast I/O (sync_with_stdio(false); cin.tie(nullptr)).
+- Avoid recursion; use iterative BFS for Kempe chains.
+- RNG: use a fast RNG (xorshift*/splitmix/mt19937) seeded with steady_clock for diversification.
+- Reuse buffers where possible; avoid heavy allocations in inner loops.
+- Ensure all helper functions taking a “color bitset” use const vector<uint64_t>& (single bitset) to avoid operator& type mismatches. Do NOT pass a vector<vector<uint64_t>> where a vector<uint64_t> is expected.
+- Ensure all bitset scans are bounded by B = ceil(N/64), with N ≤ 500 (so B ≤ 8). Guard indices with if (idx < N) when decoding bit positions.
+
+Suggested control flow:
+1) Read N,M and edges; ignore self-loops; set edges in adj; ensure symmetry; clear adj[v][v].
+2) Build complement comp with maskAll; clear comp[v][v]; compute degG, degC.
+3) Prepare multiple orders (degC-desc, degG-desc, Welsh–Powell order, random).
+4) Repeatedly until time budget:
+   - Run several builders: DSATUR (deterministic and randomized), greedy clique-packing with different orders, clique-extraction-by-intersection with different seeds, optional Welsh–Powell on complement.
+   - On each produced coloring:
+     - Rebuild colBits/colSize from color.
+     - Run local improvements as described, including targeted K-1 elimination if time allows.
+     - Compress colors and validate.
+   - Keep the best valid coloring by K.
+5) If best is invalid (should not happen), fallback to 1-vertex-per-color.
+6) Output exactly N lines with best coloring (1-based, contiguous).
+
+Edge handling:
+- Multiple edges: treat as one (bitset naturally deduplicates).
+- Self-loops: ignore; ensure adj[v][v] == 0; comp[v][v] == 0.
+
+Output:
+- Print exactly N lines with 1-based color ids (contiguous [1..K]).
+- No extra text.
+
+Wrap ONLY the final C++ code within ```cpp fences and nothing else.

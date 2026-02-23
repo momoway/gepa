@@ -1,0 +1,119 @@
+You are a competitive programmer. Write a single, deterministic C++17 program that solves the AtCoder Heuristic Contest AHC004 “torus genome” problem. The program must read from stdin and write to stdout only. The final ChatGPT message must contain ONLY the complete C++ source code wrapped in ```cpp fences—no explanations, comments, blank lines, or any extra text before/after the fences. The code itself must not contain comments or blank lines either.
+
+Problem summary and input format
+- Input:
+  - First line: N M
+  - Next M lines: s1..sM (strings over 'A'..'H', each length in [2,12])
+- Output:
+  - Exactly N lines
+  - Each line must be exactly N characters
+  - Allowed characters: 'A'..'H' and '.'
+
+Subsequence definition with toroidal wrap-around (horizontal or vertical contiguous sequences modulo N). Matching cannot pass through '.', which resets matches.
+
+Toroidal scan detail for an N-length line T:
+- Conceptually scan U = T + T (length 2N). If a match of a pattern of length L ends at index j (0-based in U), accept it only if its start s = j - L + 1 satisfies 0 ≤ s ≤ N-1.
+- Efficient enforcement: for each j, only consider L in [Llo..Lhi], with
+  - Llo = max(2, j - N + 2)
+  - Lhi = min(12, j + 1)
+- If T[pos]=='.', reset the automaton state to 0; matches cannot pass through '.'.
+
+Constraints and performance:
+- Official limits: ~2 seconds, standard memory limits.
+- Do not assume N=20; always read and use N from input.
+- Typical M ≈ [400,800], total pattern length ≤ ~9600.
+- Maintain a strict time guard and finalize output before deadline. Always keep a valid fallback grid ready.
+
+Required deterministic strategy with safeguards
+
+1) Fast evaluation with Aho–Corasick (AC):
+- Alphabet size: 8 ('A'..'H'), map 'A'→0, ..., 'H'→7.
+- Build AC automaton from all M patterns in O(total length), with nodes containing:
+  - next[8] transitions (initialize missing transitions to -1; later filled to valid next via BFS; root missing transitions become 0),
+  - suffix link (int),
+  - an output bitset array storing which pattern indices end at this node for each possible pattern length L in [2..12].
+- Bitset representation:
+  - Use vector<uint64_t>. Let blocks = (M + 63) >> 6.
+  - Store outputs flattened across lengths: totalOutBlocks = 11 * blocks, where the segment for length L is at offset (L - 2) * blocks. Set bit for pattern i by out[seg + (i>>6)] |= 1ULL << (i&63).
+- Building AC:
+  - Insert each pattern into the trie, and at the terminal node v for pattern i of length L, set its bit in the L segment.
+  - Initialize root transitions to 0 for all characters; perform BFS:
+    - For node v, let lv = link[v]. First do out[v,*] |= out[lv,*] across all totalOutBlocks to inherit outputs along suffix links.
+    - For each c in 0..7:
+      - If next[v][c] != -1, set link[next[v][c]] = nodes[lv].next[c] and push it to BFS.
+      - Else set next[v][c] = nodes[lv].next[c].
+- Scanning a line T (length N):
+  - Given an accumulator bitset acc with size blocks, zero it before scanning.
+  - Iterate j from 0 to 2N-1. Let ch = T[j%N].
+  - If ch == '.', set state=0 and continue.
+  - Otherwise feed ch into AC: state = nodes[state].next[ch - 'A'].
+  - Compute Llo and Lhi as above. If Llo ≤ Lhi, for each L in [Llo..Lhi], OR the node’s out segment for L into acc.
+
+2) Grid construction heuristic (greedy placement):
+- Compute global frequency of 'A'..'H' across input strings; let fillc be the most frequent character.
+- Maintain baseGrid = N×N filled with fillc (valid fallback).
+- Main grid starts as N×N filled with '.' to allow conflict-aware placement.
+- Maintain per-row and per-column occupancy counts: number of non-'.' cells in each row/column.
+- Order patterns by descending length; for ties, by original index ascending (stable).
+- For each pattern p:
+  - Exact-presence check without adding letters:
+    - Rows: for each row r and start s0=0..N-1, check unique positions modulo N for t=0..L-1 using a seenRow[N] flag and an expect buffer: every unique position must already be non-'.' and equal to p[t]; if so, skip placement for p.
+    - Columns: analogous using seenCol and expect per column.
+  - Otherwise, search best feasible placement among all rows and columns:
+    - Feasible if no existing non-'.' cell conflicts with p at any involved unique position; '.' are fillable.
+    - For each feasible candidate, compute holes = count of unique '.' cells that would be newly written by placing p (only unique positions).
+    - Tie-breakers (in order): smaller holes; then smaller current occupancy of the line (rowOcc[r] for rows, colOcc[c] for columns); then prefer rows over columns on full ties; then smaller line index; then smaller start index s0.
+    - Choose the best feasible candidate; if none, skip p.
+    - If best_holes > 0, place p by writing its chars into '.' cells only; never overwrite or change existing non-'.' cells. Update rowOcc/colOcc counts accordingly.
+- After greedy placement, fill any remaining '.' with fillc.
+
+3) Incremental evaluation and local improvement under a time guard:
+- Build AC once (before construction).
+- After filling, compute:
+  - For each row r: rowBits[r] via AC scan of row string.
+  - For each column c: colBits[c] via AC scan of colStr.
+  - globalBits = OR over all rowBits and colBits; currC = popcount(globalBits).
+- Use a steady_clock time guard: set a deadline around 1880–1900 ms from program start. Check time at the start of each outer loop and break if exceeded. If time runs out at any point, immediately print the current grid.
+- Local improvements (accept first strictly improving move per target to ensure determinism and speed):
+  - Row rotations:
+    - For each row r (0..N-1), for shifts sh=1..N-1 deterministically:
+      - Build a rotated row newrow by cyclically shifting oldrow right by sh: newrow[i] = oldrow[(i - sh + N) % N].
+      - Temporarily apply newrow to grid[r].
+      - Recompute rowBitsTemp for that row via AC scan of newrow.
+      - Recompute colBits for all columns (each column’s string colStr obtained by reading grid[*][c]).
+      - Build newGlobal by OR’ing rowBits (with row r replaced by rowBitsTemp) and all colBits, then popcount.
+      - If strictly greater than currC, accept: set rowBits[r]=rowBitsTemp; keep rotated row; keep updated colBits; set currC=newC; break to next row. Otherwise revert row r to oldrow and continue.
+  - Column rotations:
+    - Analogous: for each column c and sh=1..N-1, rotate column right by sh, recompute colBitsTemp for that column, recompute rowBits for all rows, evaluate global popcount; accept first strict improvement and update; otherwise revert.
+  - Single-cell letter tweaks:
+    - For each cell (r,c), try replacing with each of the 8 letters (skip if identical). For each trial, temporarily change the cell, recompute rowBits[r] and colBits[c] only, combine all rowBits and colBits to get new count, accept first strict improvement and update; otherwise revert.
+- All loops must check the time guard at the start of the loop and break cleanly when time is exceeded.
+
+4) Safety/fallback and correctness:
+- Maintain baseGrid (all fillc) as a valid fallback. If anything fails catastrophically or time runs out before producing a fully filled grid, output baseGrid. After greedy placement, explicitly fill any remaining '.' with fillc so the grid contains only letters.
+- Always ensure the final output has exactly N lines, each of length N, consisting only of 'A'..'H'.
+- No extra lines or spaces; no debug prints.
+
+5) Implementation details and optimizations:
+- Use fast I/O: ios::sync_with_stdio(false); cin.tie(nullptr);
+- Avoid per-iteration allocations; reuse buffers:
+  - Reuse a single string colStr(N, 'A') to assemble columns for scanning.
+  - Reuse temporary vectors<uint64_t> for scans (accumulators) sized to blocks; zero them via fill.
+  - Maintain rowBits as vector<vector<uint64_t>>(N, vector<uint64_t>(blocks)), same for colBits.
+  - For temporary recomputations during local search, allocate tmp containers (e.g., tmpColBits, tmpRowBits, rowTemp, colTemp, g/global) once per loop scope and reuse them; do not reallocate inside tight inner loops.
+- Bitset utilities:
+  - popcount over vector<uint64_t> → sum of __builtin_popcountll(x).
+  - OR two bitset vectors elementwise in a loop.
+- Determinism:
+  - No randomness; all tie-breakers must be strictly as specified; accept-first-improvement policy in local search.
+- Robustness:
+  - Handle any N≥1. Patterns have length at least 2; scanning logic naturally handles N<2 (no matches).
+  - In scans, if the accumulator vector size is not blocks, resize and zero it; otherwise zero it without reallocation.
+  - Never overwrite existing non-'.' cells during greedy placement.
+  - Ensure all variable scopes are correct; avoid shadowing critical names like blocks; prefer distinct local names such as bitBlocks in main vs class members if needed.
+  - Ensure all braces are balanced; do not leave any unclosed scopes; end main with return 0; and a final closing brace.
+  - Ensure AC node out bitsets are sized to totalOutBlocks and segments are addressed via seg=(L-2)*blocks.
+  - Initialize the root by setting all missing transitions to 0.
+
+Final output requirement:
+- Print exactly N lines, each line exactly N characters, only 'A'..'H'. The final ChatGPT message must contain only the complete C++17 source code wrapped in ```cpp fences, with no comments or blank lines in the code or the message.
